@@ -1,0 +1,7 @@
+# Bundle patch: mount the plugin's host half.
+#
+# The browser half is discovered from package.json `dsh.client`; the host half
+# owns the preference document and the user-added launcher route.
+- insert:
+    - id: open-with-control
+      name: 'dsh-open-with-control'
