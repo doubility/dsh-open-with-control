@@ -24,7 +24,9 @@
     "icon.svg",
     "README.md",
     "LICENSE",
-    "README.zh.md"
+    "README.zh.md",
+    "screenshots.json",
+    "assets/*.png"
   ],
   "license": "MIT",
   "engines": {

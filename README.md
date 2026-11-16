@@ -6,6 +6,8 @@ Customize the **Open with** menu in the DeepSeek Harness session header: choose 
 
 DeepSeek Harness ships an "Open In…" split button in the session header that opens the current workspace directory in an installed application. That menu is fixed: every application the host can detect is listed, in a fixed order, with a remembered last choice. This plugin replaces that control with a configurable one.
 
+![The Open with menu listing two applications, with the current default marked and a Manage open with… row](assets/menu.png)
+
 ## Features
 
 - **Choose what appears** — remove applications you never use; restore them later from a collapsed *Removed* section
@@ -15,6 +17,10 @@ DeepSeek Harness ships an "Open In…" split button in the session header that o
 - **Real icons** — `.icns` on macOS, extracted executable icons on Windows
 - **Localized** — Simplified Chinese and English
 - **Safe floor** — at least one application always stays in the menu
+
+The management panel:
+
+![The management panel: applications in the menu with reorder and remove controls, a collapsed removed section, and the system application picker](assets/manage.png)
 
 ## Requirements
 
