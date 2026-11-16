@@ -1,5 +1,7 @@
 # dsh-open-with-control
 
+English | [中文](README.zh.md)
+
 Customize the **Open with** menu in the DeepSeek Harness session header: choose which applications appear, reorder them, pin a default, and add any application installed on your machine — with real icons.
 
 DeepSeek Harness ships an "Open In…" split button in the session header that opens the current workspace directory in an installed application. That menu is fixed: every application the host can detect is listed, in a fixed order, with a remembered last choice. This plugin replaces that control with a configurable one.
