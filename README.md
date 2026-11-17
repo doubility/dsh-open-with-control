@@ -1,112 +1,112 @@
 # dsh-open-with-control
 
-English | [中文](README.zh.md)
+[English](README.en.md) | 中文
 
-Customize the **Open with** menu in the DeepSeek Harness session header: choose which applications appear, reorder them, pin a default, and add any application installed on your machine — with real icons.
+自定义 DeepSeek Harness 会话头部右上角的**「打开方式」**菜单：选择显示哪些应用、调整顺序、设定默认应用，并把本机已安装的应用加进来——带真实图标。
 
-DeepSeek Harness ships an "Open In…" split button in the session header that opens the current workspace directory in an installed application. That menu is fixed: every application the host can detect is listed, in a fixed order, with a remembered last choice. This plugin replaces that control with a configurable one.
+DeepSeek Harness 自带一个「打开方式」分裂按钮，用已安装的应用打开当前工作目录。但那个菜单是固定的：宿主能探测到的应用全部列出、顺序固定、只记住上次选择。本插件用一个可配置的控件替换它。
 
-![The Open with menu listing two applications, with the current default marked and a Manage open with… row](assets/menu.png)
+![「打开方式」菜单里列出两个应用，当前默认项带勾选标记，底部是「管理打开方式…」](assets/menu.png)
 
-## Features
+## 功能
 
-- **Choose what appears** — remove applications you never use; restore them later from a collapsed *Removed* section
-- **Reorder** — move entries up and down; the menu follows your order
-- **Pin a default** — the main button uses it; selecting an application in the menu also makes it the default
-- **Add installed applications** — open the system applications folder and pick from what is actually installed, icons included
-- **Real icons** — `.icns` on macOS, extracted executable icons on Windows
-- **Localized** — Simplified Chinese and English
-- **Safe floor** — at least one application always stays in the menu
+- **决定显示哪些应用**——不需要的应用直接移除；之后可从折叠的「已移除」区恢复
+- **调整顺序**——上移/下移，菜单按你的顺序排列
+- **设定默认应用**——主按钮用它打开；在菜单里点选某个应用也会把它设为默认
+- **添加已安装的应用**——打开系统应用目录，从本机真实安装的应用里挑选，带图标
+- **真实图标**——macOS 取 `.icns`，Windows 提取可执行文件图标
+- **中英双语**
+- **保底约束**——菜单里至少保留一个应用
 
-The management panel:
+管理面板：
 
-![The management panel: applications in the menu with reorder and remove controls, a collapsed removed section, and the system application picker](assets/manage.png)
+![管理面板：菜单中的应用带排序与移除按钮，可折叠的「已移除」区，以及系统应用选择器](assets/manage.png)
 
-## Requirements
+## 环境要求
 
-- A DeepSeek Harness **Web** profile (`dsh web` / the Desktop app)
-- The shipped `@deepseek-ai/dsh-host-open-in-app` and `@deepseek-ai/dsh-client-ui-open-in-app` rows (they are part of the `@deepseek-ai/dsh-web-app` bundle, so a Web profile has them)
+- DeepSeek Harness 的 **Web** 形态（`dsh web` 或桌面版）
+- 官方自带的 `@deepseek-ai/dsh-host-open-in-app` 与 `@deepseek-ai/dsh-client-ui-open-in-app` 两行（它们属于 `@deepseek-ai/dsh-web-app` 捆绑包，Web 形态默认就有）
 
-## Install
+## 安装
 
 ```bash
 dsh plugin --profile <profile> add dsh-open-with-control
 ```
 
-Or from a local checkout:
+或从本地目录安装：
 
 ```bash
 dsh plugin --profile <profile> add /absolute/path/to/dsh-open-with-control
 ```
 
-Then reload the page. The session header's Open with control now carries a **Manage open with…** row at the bottom of its menu.
+然后刷新页面。会话头部的「打开方式」控件菜单底部会多出一行 **「管理打开方式…」**。
 
-## Use
+## 使用
 
-Click the chevron next to the Open with button, then **Manage open with…**:
+点「打开方式」按钮右侧的箭头，再点「管理打开方式…」：
 
-| Section | What you can do |
+| 区块 | 可以做什么 |
 |---|---|
-| *In the menu* | Reorder with the arrows, set the default, remove an entry |
-| *Removed* | Collapsed by default; restore an entry, or delete a user-added one permanently |
-| *Add system application* | **Open applications folder, pick apps…** lists what this machine has installed (with icons); check the ones you want |
+| *菜单中的应用* | 用箭头调整顺序、设为默认、移除 |
+| *已移除* | 默认折叠；恢复某个应用，或把自定义应用彻底删除 |
+| *添加系统应用* | 点「打开应用目录，选择应用…」，列出本机已安装的应用（带图标），勾选后加入 |
 
-Selecting an application in the header menu both opens the directory with it **and** makes it the new default.
+在头部菜单里点选某个应用时，会**同时**用它打开当前目录，并把它设为新的默认应用。
 
-## How it works
+## 实现方式
 
-The plugin registers its own control into `conversation.session.header.utilities` at a lower slot priority than the shipped one, so it replaces that cell without patching the shipped package. Catalog applications keep using the shipped `open-in-app` routes for listing and launching; the plugin adds:
+插件把自己的控件注册进 `conversation.session.header.utilities`，并以比官方更低的 slot 优先级占用同一个格子，从而替换掉那个控件，而不需要改动官方包。内置目录应用继续复用官方的 `open-in-app` 路由做列举和启动；插件额外提供：
 
-| Route | Purpose |
+| 路由 | 用途 |
 |---|---|
-| `GET/POST /open-with-control/state` | Read or replace the stored preference document |
-| `POST /open-with-control/open` | Launch a user-added application on a directory |
-| `GET /open-with-control/system-apps` | List installed applications for the picker |
-| `POST /open-with-control/system-open` | Launch an installed application on a directory |
-| `GET /open-with-control/system-icon?path=…` | Serve one application's icon as PNG |
+| `GET/POST /open-with-control/state` | 读取或替换偏好文档 |
+| `POST /open-with-control/open` | 用自定义应用打开某个目录 |
+| `GET /open-with-control/system-apps` | 列出本机已安装的应用，供选择器使用 |
+| `POST /open-with-control/system-open` | 用已安装的应用打开某个目录 |
+| `GET /open-with-control/system-icon?path=…` | 以 PNG 返回某个应用的图标 |
 
-All routes sit behind the deployment's connection trust fence. Preferences live in `$DSH_HOME/storages/open-with-control.json`, written atomically.
+所有路由都在部署的 connection 信任校验之后。偏好保存在 `$DSH_HOME/storages/open-with-control.json`，采用原子写入。
 
-## Platform notes
+## 平台说明
 
 ### macOS
 
-- Applications are `.app` bundles discovered under `/Applications` and `~/Applications`
-- Icons come from each bundle's `CFBundleIconFile` via `plutil` + `sips`
-- Launching uses `open -a <bundle> <directory>`, so the application receives the directory
+- 应用是 `/Applications` 与 `~/Applications` 下的 `.app` 包
+- 图标通过 `plutil` 读 `CFBundleIconFile`，再用 `sips` 转成 PNG
+- 启动使用 `open -a <应用包> <目录>`，应用收到的是目录本身
 
 ### Windows
 
-- Applications are `.exe` files discovered up to three levels deep under `Program Files` and `Program Files (x86)` (bounded by an entry budget)
-- Icons are extracted through PowerShell `System.Drawing`
-- Launching starts the executable with the directory as its argument
+- 应用是 `Program Files` 与 `Program Files (x86)` 下最多三层的 `.exe`（有条目预算上限）
+- 图标通过 PowerShell 的 `System.Drawing` 提取
+- 启动时把目录作为参数传给该可执行文件
 
-Windows limitations worth knowing:
+Windows 上需要知道的限制：
 
-- **Whether the directory is honored depends on the application.** There is no `open -a` equivalent; the path is passed as a plain argument. Editors and IDEs that accept a folder argument (VS Code, Cursor, …) work; applications that ignore arguments will just launch.
-- **Helper executables appear in the list.** Recursive scanning surfaces things like `uninstall.exe` or `vc_redist.x64.exe`; pick deliberately.
-- **Microsoft Store (UWP) applications are not listed** — they do not live under Program Files.
-- **Icon extraction needs PowerShell with `System.Drawing`.** Where it fails, entries simply render without an icon.
+- **目录参数是否生效取决于应用本身。** Windows 没有 `open -a` 这种统一入口，路径只是作为普通参数传入。支持接收目录参数的编辑器/IDE（VS Code、Cursor 等）没问题；忽略参数的应用则只会被启动。
+- **会扫出辅助程序。** 递归扫描会把 `uninstall.exe`、`vc_redist.x64.exe` 之类也列出来，需要自己甄别。
+- **Microsoft Store（UWP）应用不会出现**——它们不在 Program Files 下。
+- **图标提取依赖 PowerShell 的 `System.Drawing`。** 提取失败时该条目只是没有图标，不影响使用。
 
 ### Linux
 
-Not supported yet: the application picker has no Linux discovery, so it reports no applications. Catalog applications from the shipped package keep working.
+暂不支持：应用选择器没有 Linux 探测逻辑，因此会显示没有应用。官方包提供的目录应用仍然可用。
 
-## Known limitations
+## 已知限制
 
-- **Catalog applications cannot be deleted, only removed.** The host re-discovers installed editors, terminals, and file managers on every load, so removing one records it as removed rather than dropping it; this is what *Restored* restores. Applications you added yourself are truly deleted.
-- **The installed-application list is read on demand.** An application installed while the page is open appears after reopening the picker.
-- **The system application list is not filtered by relevance.** Every bundle/executable found is offered.
+- **内置目录应用只能移除，不能删除。** 宿主每次加载都会重新探测已安装的编辑器、终端和文件管理器，所以「移除」只是记录下来，这也是「已移除」区能恢复它们的原因。你自己添加的应用则是真正删除。
+- **已安装应用列表是按需读取的。** 页面打开期间新装的应用，需要重新打开选择器才会出现。
+- **系统应用列表没有做相关性过滤。** 扫描到的每个应用包/可执行文件都会列出来。
 
-## Development
+## 开发
 
-The package is a Cordis bundle: `index.js` is the Host half, `client.js` the browser half, `cordis.patch.yml` mounts the row. No build step — both halves ship as source.
+本包是一个 Cordis 捆绑包：`index.js` 是宿主端，`client.js` 是浏览器端，`cordis.patch.yml` 负责挂载。没有构建步骤，两端都直接以源码发布。
 
 ```bash
 node --check index.js
 node --check client.js
 ```
 
-## License
+## 许可证
 
 MIT

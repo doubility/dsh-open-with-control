@@ -22,9 +22,9 @@
     "cordis.patch.yml",
     "locale/*.json",
     "icon.svg",
-    "README.md",
+    "README.en.md",
     "LICENSE",
-    "README.zh.md",
+    "README.md",
     "screenshots.json",
     "assets/*.png"
   ],
