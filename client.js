@@ -18,6 +18,8 @@ window.__ModuleLoader__.load({
     const OPEN_ROUTE = 'open-with-control/open';
     /** Host route listing installed system applications (macOS / Windows). */
     const SYSTEM_APPS_ROUTE = 'open-with-control/system-apps';
+    /** Same route, asking for every installed application instead of the allowlist. */
+    const SYSTEM_APPS_ALL_ROUTE = 'open-with-control/system-apps?all=1';
     /** Host route launching one system application on one directory. */
     const SYSTEM_OPEN_ROUTE = 'open-with-control/system-open';
     /** Host route serving one system application's PNG icon. */
@@ -62,28 +64,6 @@ window.__ModuleLoader__.load({
       gnometerminal: 'GNOME Terminal',
       konsole: 'Konsole',
     };
-
-    /** Applications the scanner can offer to add, keyed by shipped catalog id. */
-    const CANDIDATES = [
-      { id: 'cursor', kind: 'shipped', name: 'Cursor', platform: 'darwin', paths: ['/Applications/Cursor.app'], command: null, args: [] },
-      { id: 'vscode', kind: 'shipped', name: 'VS Code', platform: 'darwin', paths: ['/Applications/Visual Studio Code.app'], command: null, args: [] },
-      { id: 'zed', kind: 'shipped', name: 'Zed', platform: 'darwin', paths: ['/Applications/Zed.app'], command: null, args: [] },
-      { id: 'intellij', kind: 'shipped', name: 'IntelliJ IDEA', platform: 'darwin', paths: ['/Applications/IntelliJ IDEA.app', '/Applications/IntelliJ IDEA CE.app'], command: null, args: [] },
-      { id: 'pycharm', kind: 'shipped', name: 'PyCharm', platform: 'darwin', paths: ['/Applications/PyCharm.app', '/Applications/PyCharm CE.app'], command: null, args: [] },
-      { id: 'webstorm', kind: 'shipped', name: 'WebStorm', platform: 'darwin', paths: ['/Applications/WebStorm.app'], command: null, args: [] },
-      { id: 'goland', kind: 'shipped', name: 'GoLand', platform: 'darwin', paths: ['/Applications/GoLand.app'], command: null, args: [] },
-      { id: 'sublimetext', kind: 'shipped', name: 'Sublime Text', platform: 'darwin', paths: ['/Applications/Sublime Text.app'], command: null, args: [] },
-      { id: 'iterm', kind: 'shipped', name: 'iTerm2', platform: 'darwin', paths: ['/Applications/iTerm.app'], command: null, args: [] },
-      { id: 'warp', kind: 'shipped', name: 'Warp', platform: 'darwin', paths: ['/Applications/Warp.app'], command: null, args: [] },
-      { id: 'ghostty', kind: 'shipped', name: 'Ghostty', platform: 'darwin', paths: ['/Applications/Ghostty.app'], command: null, args: [] },
-      { id: 'androidstudio', kind: 'shipped', name: 'Android Studio', platform: 'darwin', paths: ['/Applications/Android Studio.app'], command: null, args: [] },
-      { id: 'vscodeinsiders', kind: 'shipped', name: 'VS Code Insiders', platform: 'darwin', paths: ['/Applications/Visual Studio Code - Insiders.app'], command: null, args: [] },
-      { id: 'xcode', kind: 'shipped', name: 'Xcode', platform: 'darwin', paths: ['/Applications/Xcode.app'], command: null, args: [] },
-      { id: 'kitty', kind: 'custom', name: 'kitty', platform: 'darwin', paths: [], command: 'kitty', args: ['--directory', '{path}'] },
-      { id: 'neovim', kind: 'custom', name: 'Neovim', platform: 'darwin', paths: [], command: 'nvim', args: ['{path}'] },
-      { id: 'emacs', kind: 'custom', name: 'Emacs', platform: 'darwin', paths: [], command: 'emacs', args: ['{path}'] },
-      { id: 'subl', kind: 'custom', name: 'Sublime Text (CLI)', platform: 'darwin', paths: [], command: 'subl', args: ['{path}'] },
-    ];
 
     /** One tiny observable store, so the header control and the overlay panels share one truth. */
     function createStore(initial) {
@@ -221,7 +201,13 @@ window.__ModuleLoader__.load({
         dialog: false,
         busy: false,
         notice: null,
-        sysApps: [],
+        /** Installed applications matching the developer allowlist; null until read. */
+        sysApps: null,
+        /** Every installed application the host can see; null until read. */
+        sysAppsAll: null,
+        /** Which of the two lists the picker shows. */
+        sysMode: 'whitelist',
+        sysDialogOpen: false,
         sysBrowsing: false,
       });
       let noticeSeq = 0;
@@ -298,15 +284,50 @@ window.__ModuleLoader__.load({
         }
       };
 
-      /** Read the installed system applications the host can see. */
-      const browseSystem = async (t) => {
+      /**
+       * Read one of the two installed-application lists. The allowlist is the
+       * default view; the full list is asked for with `?all=1`, so the choice
+       * stays a view preference and never becomes stored state.
+       */
+      const readSystemApps = async (mode, t) => {
         patch({ sysBrowsing: true });
-        const apps = await readJson(SYSTEM_APPS_ROUTE, { headers: { accept: 'application/json' } });
-        patch({ sysBrowsing: false, sysApps: Array.isArray(apps) ? apps : [] });
+        const apps = await readJson(
+          mode === 'all' ? SYSTEM_APPS_ALL_ROUTE : SYSTEM_APPS_ROUTE,
+          { headers: { accept: 'application/json' } },
+        );
+        const list = Array.isArray(apps) ? apps : [];
+        patch(mode === 'all' ? { sysBrowsing: false, sysAppsAll: list } : { sysBrowsing: false, sysApps: list });
         if (!Array.isArray(apps)) announce(t('systemApps.failed'), 'error');
       };
 
-      return { state, patch, announce, dismissNotice, load, persist, open, browseSystem };
+      /** Open the picker on the allowlist, reading it on the first visit. */
+      const openPicker = async (t) => {
+        patch({ sysDialogOpen: true, sysMode: 'whitelist' });
+        if (state.getSnapshot().sysApps === null) await readSystemApps('whitelist', t);
+      };
+
+      const closePicker = () => patch({ sysDialogOpen: false });
+
+      /** Switch the picker between the allowlist and every installed application. */
+      const setSystemMode = async (mode, t) => {
+        patch({ sysMode: mode });
+        const current = state.getSnapshot();
+        const cached = mode === 'all' ? current.sysAppsAll : current.sysApps;
+        if (cached === null) await readSystemApps(mode, t);
+      };
+
+      return {
+        state,
+        patch,
+        announce,
+        dismissNotice,
+        load,
+        persist,
+        open,
+        openPicker,
+        closePicker,
+        setSystemMode,
+      };
     }
 
     /** Fixed positioning for a portaled menu, because the header clips overflow. */
@@ -343,6 +364,11 @@ window.__ModuleLoader__.load({
       return position;
     }
 
+    /** Hide an image whose route has no icon, instead of showing a broken glyph. */
+    function hideBrokenIcon(event) {
+      event.currentTarget.style.visibility = 'hidden';
+    }
+
     /** Glyphs; currentColor keeps them on the host's label colors. */
     const Icon = {
       chevron: () =>
@@ -377,20 +403,19 @@ window.__ModuleLoader__.load({
           },
           h('path', { d: 'M3 8.5l3.2 3L13 4.5' }),
         ),
-      app: () =>
+      app: (size) =>
         h(
           'svg',
           {
             viewBox: '0 0 16 16',
-            width: 13,
-            height: 13,
+            width: size ?? 13,
+            height: size ?? 13,
             fill: 'none',
             stroke: 'currentColor',
             strokeWidth: 1.4,
             strokeLinecap: 'round',
             strokeLinejoin: 'round',
             'aria-hidden': true,
-            style: { flex: 'none' },
           },
           h('rect', { x: 2, y: 3.5, width: 12, height: 9, rx: 2 }),
           h('path', { d: 'M2 6.5h12' }),
@@ -461,7 +486,73 @@ window.__ModuleLoader__.load({
           },
           h('path', { d: 'M8 3.5v9M4 8.5l4 4 4-4' }),
         ),
+      search: () =>
+        h(
+          'svg',
+          {
+            viewBox: '0 0 16 16',
+            width: 13,
+            height: 13,
+            fill: 'none',
+            stroke: 'currentColor',
+            strokeWidth: 1.5,
+            strokeLinecap: 'round',
+            'aria-hidden': true,
+          },
+          h('circle', { cx: 7, cy: 7, r: 4.1 }),
+          h('path', { d: 'M10.2 10.2l3.1 3.1' }),
+        ),
+      folder: (size) =>
+        h(
+          'svg',
+          {
+            viewBox: '0 0 16 16',
+            width: size ?? 14,
+            height: size ?? 14,
+            fill: 'none',
+            stroke: 'currentColor',
+            strokeWidth: 1.4,
+            strokeLinecap: 'round',
+            strokeLinejoin: 'round',
+            'aria-hidden': true,
+          },
+          h('path', { d: 'M1.9 4.7c0-.8.6-1.4 1.4-1.4h2.2l1.3 1.6h5.5c.8 0 1.4.6 1.4 1.4v5c0 .8-.6 1.4-1.4 1.4H3.3c-.8 0-1.4-.6-1.4-1.4z' }),
+        ),
+      layers: (size) =>
+        h(
+          'svg',
+          {
+            viewBox: '0 0 16 16',
+            width: size ?? 13,
+            height: size ?? 13,
+            fill: 'none',
+            stroke: 'currentColor',
+            strokeWidth: 1.4,
+            strokeLinecap: 'round',
+            strokeLinejoin: 'round',
+            'aria-hidden': true,
+          },
+          h('path', { d: 'M8 2.3l5.3 2.8L8 7.9 2.7 5.1z' }),
+          h('path', { d: 'M2.7 8.1L8 10.9l5.3-2.8' }),
+          h('path', { d: 'M2.7 11.1L8 13.9l5.3-2.8' }),
+        ),
     };
+
+    /** One application glyph: the real icon when the host can supply it. */
+    function AppGlyph(props) {
+      const { icon, size = 18 } = props;
+      if (typeof icon !== 'string' || icon === '') {
+        return h('span', { className: 'owc-glyph', style: { width: size, height: size } }, Icon.app(size - 4));
+      }
+      return h('img', {
+        className: 'owc-icon',
+        style: { width: size, height: size },
+        src: icon,
+        alt: '',
+        draggable: false,
+        onError: hideBrokenIcon,
+      });
+    }
 
     /** The split button in the session header. */
     function OpenWithAction(props) {
@@ -524,6 +615,7 @@ window.__ModuleLoader__.load({
                   ref: menuRef,
                   style: { left: position.left, top: position.top, maxHeight: position.maxHeight },
                 },
+                h('div', { className: 'owc-menuLabel' }, t('action.menuLabel')),
                 rows.map((row) =>
                   h(
                     'button',
@@ -535,17 +627,19 @@ window.__ModuleLoader__.load({
                       'aria-checked': preferred !== undefined && row.id === preferred.id,
                       onClick: () => run(row),
                     },
-                    h('span', { className: 'owc-mark' }, preferred !== undefined && row.id === preferred.id ? Icon.check() : null),
-                    row.icon !== null
-                      ? h('img', { className: 'owc-icon', src: row.icon, alt: '', draggable: false })
-                      : Icon.app(),
+                    h(
+                      'span',
+                      { className: 'owc-mark' },
+                      preferred !== undefined && row.id === preferred.id ? Icon.check() : null,
+                    ),
+                    h(AppGlyph, { icon: row.icon, size: 16 }),
                     h('span', { className: 'owc-itemName' }, row.name),
                     preferred !== undefined && row.id === preferred.id
                       ? h('span', { className: 'owc-itemHint' }, t('action.defaultTag'))
                       : null,
                   ),
                 ),
-                rows.length > 0 ? h('div', { className: 'owc-sep' }) : null,
+                h('div', { className: 'owc-sep' }),
                 h(
                   'button',
                   {
@@ -556,7 +650,7 @@ window.__ModuleLoader__.load({
                       controller.patch({ dialog: true });
                     },
                   },
-                  h('span', { className: 'owc-mark' }, Icon.gear()),
+                  h('span', { className: 'owc-mark' }, Icon.gear(12)),
                   h('span', { className: 'owc-itemName' }, t('action.manage')),
                 ),
               ),
@@ -597,9 +691,7 @@ window.__ModuleLoader__.load({
                     'aria-label': t('action.openIn', { app: preferred.name }),
                     onClick: () => run(preferred),
                   },
-                  preferred.icon !== null
-                    ? h('img', { className: 'owc-icon', src: preferred.icon, alt: '', draggable: false })
-                    : Icon.app(),
+                  h(AppGlyph, { icon: preferred.icon, size: 14 }),
                 ),
                 h(
                   'button',
@@ -626,17 +718,22 @@ window.__ModuleLoader__.load({
       return `sys:${label.toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '')}`;
     }
 
-    /** Pick from the applications this system reports as installed. */
+    /**
+     * The application directory: every installed application the host reports,
+     * the allowlist first and the full list one toggle away.
+     */
     function SystemAppsDialog(props) {
       const { controller, t } = props;
       const snapshot = useStore(controller.state, (value) => value);
-      const [picked, setPicked] = React.useState(() => new Set());
+      const [picked, setPicked] = React.useState([]);
       const [filter, setFilter] = React.useState('');
 
       React.useEffect(() => {
         if (!snapshot.sysDialogOpen) return undefined;
+        setPicked([]);
+        setFilter('');
         const onKeyDown = (event) => {
-          if (event.key === 'Escape') controller.patch({ sysDialogOpen: false });
+          if (event.key === 'Escape') controller.closePicker();
         };
         document.addEventListener('keydown', onKeyDown);
         return () => document.removeEventListener('keydown', onKeyDown);
@@ -644,22 +741,25 @@ window.__ModuleLoader__.load({
 
       if (!snapshot.sysDialogOpen) return null;
 
-      const current = new Set(snapshot.prefs.custom.map((entry) => entry.id));
-      const shown = (snapshot.sysApps ?? []).filter(
-        (app) => filter.trim() === '' || app.label.toLowerCase().includes(filter.trim().toLowerCase()),
+      const showAll = snapshot.sysMode === 'all';
+      const apps = (showAll ? snapshot.sysAppsAll : snapshot.sysApps) ?? [];
+      const added = new Set(snapshot.prefs.custom.map((entry) => entry.id));
+      const needle = filter.trim().toLowerCase();
+      const shown = apps.filter(
+        (app) =>
+          needle === '' ||
+          app.label.toLowerCase().includes(needle) ||
+          String(app.path ?? '').toLowerCase().includes(needle),
       );
-      const toggle = (id) => {
-        const next = new Set(picked);
-        if (next.has(id)) next.delete(id);
-        else next.add(id);
-        setPicked(next);
-      };
+      const isPicked = (id) => picked.includes(id);
+      const toggle = (id) =>
+        setPicked((current) => (current.includes(id) ? current.filter((entry) => entry !== id) : [...current, id]));
 
       const adopt = async () => {
         const currentPrefs = snapshot.prefs;
         const next = { ...currentPrefs, custom: [...currentPrefs.custom], order: [...currentPrefs.order] };
-        for (const app of snapshot.sysApps ?? []) {
-          if (!picked.has(app.id)) continue;
+        for (const app of apps) {
+          if (!isPicked(app.id)) continue;
           const id = systemIdFor(app.label);
           if (next.custom.some((entry) => entry.id === id)) continue;
           next.custom.push({
@@ -674,9 +774,73 @@ window.__ModuleLoader__.load({
           if (!next.order.includes(id)) next.order.push(id);
         }
         await controller.persist(next, t);
-        setPicked(new Set());
-        controller.patch({ sysDialogOpen: false });
+        setPicked([]);
+        controller.closePicker();
       };
+
+      const emptyView = showAll
+        ? h(
+            'div',
+            { className: 'owc-empty' },
+            h('span', { className: 'owc-emptyIcon' }, Icon.layers(16)),
+            h('p', { className: 'owc-emptyText' }, t('systemApps.none')),
+          )
+        : h(
+            'div',
+            { className: 'owc-empty' },
+            h('span', { className: 'owc-emptyIcon' }, Icon.layers(16)),
+            h('p', { className: 'owc-emptyText' }, t('systemApps.noneWhitelist')),
+            h('p', { className: 'owc-emptyHint' }, t('systemApps.noneWhitelistHint')),
+          );
+
+      const listBody = snapshot.sysBrowsing
+        ? h(
+            'div',
+            { className: 'owc-empty' },
+            h('span', { className: 'owc-spinner' }),
+            h('p', { className: 'owc-emptyText' }, t('systemApps.running')),
+          )
+        : apps.length === 0
+          ? emptyView
+          : shown.length === 0
+            ? h(
+                'div',
+                { className: 'owc-empty' },
+                h('span', { className: 'owc-emptyIcon' }, Icon.search()),
+                h('p', { className: 'owc-emptyText' }, t('systemApps.noMatch', { query: filter.trim() })),
+              )
+            : shown.map((app) => {
+                const isAdded = added.has(systemIdFor(app.label));
+                const pickedNow = isPicked(app.id);
+                return h(
+                  'label',
+                  {
+                    className: 'owc-row owc-pickRow',
+                    key: app.id,
+                    'data-picked': pickedNow ? 'true' : 'false',
+                    'data-added': isAdded ? 'true' : 'false',
+                  },
+                  h('input', {
+                    type: 'checkbox',
+                    className: 'owc-check',
+                    checked: isAdded || pickedNow,
+                    disabled: isAdded,
+                    onChange: () => toggle(app.id),
+                  }),
+                  h(AppGlyph, { icon: `${SYSTEM_ICON_ROUTE}?path=${encodeURIComponent(app.path)}`, size: 20 }),
+                  h(
+                    'span',
+                    { className: 'owc-rowMain' },
+                    h(
+                      'span',
+                      { className: 'owc-rowTitle' },
+                      h('span', { className: 'owc-rowName' }, app.label),
+                      isAdded ? h('span', { className: 'owc-tag' }, t('systemApps.tagAdded')) : null,
+                    ),
+                    h('span', { className: 'owc-rowMeta' }, app.path),
+                  ),
+                );
+              });
 
       return h(
         'div',
@@ -684,18 +848,24 @@ window.__ModuleLoader__.load({
           className: 'owc-overlay',
           role: 'presentation',
           onPointerDown: (event) => {
-            if (event.target === event.currentTarget) controller.patch({ sysDialogOpen: false });
+            if (event.target === event.currentTarget) controller.closePicker();
           },
         },
         h(
           'div',
-          { className: 'owc-dialog', role: 'dialog', 'aria-modal': 'true', 'aria-label': t('systemApps.title') },
+          {
+            className: 'owc-dialog owc-dialogWide',
+            role: 'dialog',
+            'aria-modal': 'true',
+            'aria-label': t('systemApps.title'),
+          },
           h(
             'div',
             { className: 'owc-head' },
+            h('span', { className: 'owc-headIcon' }, Icon.folder(17)),
             h(
               'div',
-              { style: { flex: 1, minWidth: 0 } },
+              { className: 'owc-headText' },
               h('h2', { className: 'owc-title' }, t('systemApps.title')),
               h('p', { className: 'owc-sub' }, t('systemApps.subtitle')),
             ),
@@ -705,9 +875,39 @@ window.__ModuleLoader__.load({
                 type: 'button',
                 className: 'owc-close',
                 'aria-label': t('manage.close'),
-                onClick: () => controller.patch({ sysDialogOpen: false }),
+                onClick: () => controller.closePicker(),
               },
               Icon.close(14),
+            ),
+          ),
+          h(
+            'div',
+            { className: 'owc-toolbar' },
+            h(
+              'div',
+              { className: 'owc-search' },
+              Icon.search(),
+              h('input', {
+                type: 'text',
+                className: 'owc-input',
+                value: filter,
+                spellCheck: false,
+                autoFocus: true,
+                placeholder: t('systemApps.filterPlaceholder'),
+                'aria-label': t('systemApps.filterPlaceholder'),
+                onChange: (event) => setFilter(event.target.value),
+              }),
+            ),
+            h(
+              'button',
+              {
+                type: 'button',
+                className: 'owc-chip',
+                'aria-pressed': showAll,
+                onClick: () => controller.setSystemMode(showAll ? 'whitelist' : 'all', t),
+              },
+              Icon.layers(),
+              h('span', {}, showAll ? t('systemApps.showWhitelist') : t('systemApps.showAll')),
             ),
           ),
           h(
@@ -715,54 +915,38 @@ window.__ModuleLoader__.load({
             { className: 'owc-body' },
             h(
               'div',
-              { className: 'owc-field' },
-              h('input', {
-                className: 'owc-input',
-                value: filter,
-                placeholder: t('systemApps.filterPlaceholder'),
-                onChange: (event) => setFilter(event.target.value),
-              }),
+              { className: 'owc-hgroup' },
+              h('span', { className: 'owc-hlabel' }, showAll ? t('systemApps.foundAll') : t('systemApps.found')),
+              h('span', { className: 'owc-count' }, String(shown.length)),
             ),
-            h('div', { className: 'owc-hgroup' }, h('span', { className: 'owc-hlabel' }, t('systemApps.found'))),
-            snapshot.sysBrowsing
-              ? h('p', { className: 'owc-note' }, t('systemApps.running'))
-              : shown.length === 0
-                ? h('p', { className: 'owc-note' }, t('systemApps.none'))
-                : shown.map((app) =>
-                    h(
-                      'div',
-                      { className: 'owc-row', key: app.id },
-                      h('input', {
-                        type: 'checkbox',
-                        className: 'owc-check',
-                        checked: picked.has(app.id),
-                        onChange: () => toggle(app.id),
-                        style: { width: 14, height: 14, margin: 0, flex: 'none' },
-                      }),
-                      h('img', {
-                        className: 'owc-icon',
-                        src: `${SYSTEM_ICON_ROUTE}?path=${encodeURIComponent(app.path)}`,
-                        alt: '',
-                        draggable: false,
-                        onError: (event) => {
-                          event.currentTarget.style.visibility = 'hidden';
-                        },
-                      }),
-                      h('div', { className: 'owc-rowName', style: { flex: 1 } }, app.label),
-                      current.has(systemIdFor(app.label))
-                        ? h('span', { className: 'owc-tag' }, t('systemApps.tagAdded'))
-                        : h('span', { className: 'owc-tag' }, t('systemApps.tagNew')),
-                    ),
-                  ),
+            h('div', { className: 'owc-list' }, listBody),
+          ),
+          h(
+            'div',
+            { className: 'owc-foot' },
+            h(
+              'span',
+              { className: 'owc-footNote' },
+              picked.length > 0
+                ? t('systemApps.selected', { n: picked.length })
+                : showAll
+                  ? t('systemApps.countAll', { n: shown.length })
+                  : t('systemApps.footHint'),
+            ),
             h(
               'div',
-              { style: { display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 12 } },
+              { className: 'owc-footActions' },
+              h(
+                'button',
+                { type: 'button', className: 'owc-btn', onClick: () => controller.closePicker() },
+                t('systemApps.cancel'),
+              ),
               h(
                 'button',
                 {
                   type: 'button',
-                  className: 'owc-btn',
-                  disabled: snapshot.sysBrowsing || picked.size === 0,
+                  className: 'owc-btn owc-btnPrimary',
+                  disabled: snapshot.sysBrowsing || picked.length === 0,
                   onClick: adopt,
                 },
                 t('systemApps.addSelected'),
@@ -782,11 +966,13 @@ window.__ModuleLoader__.load({
       React.useEffect(() => {
         if (!snapshot.dialog) return undefined;
         const onKeyDown = (event) => {
-          if (event.key === 'Escape') controller.patch({ dialog: false });
+          // The picker stacks above this dialog and owns Escape while it is open.
+          if (event.key !== 'Escape' || snapshot.sysDialogOpen) return;
+          controller.patch({ dialog: false });
         };
         document.addEventListener('keydown', onKeyDown);
         return () => document.removeEventListener('keydown', onKeyDown);
-      }, [snapshot.dialog, controller]);
+      }, [snapshot.dialog, snapshot.sysDialogOpen, controller]);
 
       if (!snapshot.dialog) return null;
 
@@ -795,11 +981,9 @@ window.__ModuleLoader__.load({
       // At least one application must stay in the menu: the last visible row
       // can neither be hidden nor removed.
       const lastVisible = all.length === 1;
-      const listed = new Set(all.map((row) => row.id));
-      const orderIndex = new Map(prefs.order.map((id, index) => [id, index]));
       const hiddenRows = catalog
         .filter((id) => prefs.hidden.includes(id))
-        .map((id) => ({ id, kind: 'catalog', name: appName(shippedT, id) }));
+        .map((id) => ({ id, kind: 'catalog', name: appName(shippedT, id), icon: `${SHIPPED_ICON_ROUTE}/${encodeURIComponent(id)}` }));
       const hiddenCustom = prefs.custom
         .filter((entry) => prefs.hidden.includes(entry.id))
         .map((entry) => ({
@@ -807,6 +991,7 @@ window.__ModuleLoader__.load({
           kind: entry.system === true ? 'system' : 'custom',
           entry,
           name: entry.label,
+          icon: typeof entry.icon === 'string' ? entry.icon : null,
         }));
       const hidden = hiddenRows.concat(hiddenCustom);
 
@@ -854,67 +1039,91 @@ window.__ModuleLoader__.load({
        */
       const remove = (row) => (row.kind === 'catalog' ? hide(row) : removeCustom(row));
 
-      const rowActions = (row) =>
+      const visibleRow = (row) =>
         h(
           'div',
           { className: 'owc-row', key: row.id },
+          h(AppGlyph, { icon: row.icon, size: 20 }),
           h(
-            'div',
-            { style: { flex: 1, minWidth: 0 } },
-            h('div', { className: 'owc-rowName' }, row.name),
+            'span',
+            { className: 'owc-rowMain' },
+            h(
+              'span',
+              { className: 'owc-rowTitle' },
+              h('span', { className: 'owc-rowName' }, row.name),
+              prefs.defaultApp === row.id
+                ? h('span', { className: 'owc-tag owc-tagDefault' }, t('manage.defaultTag'))
+                : null,
+            ),
             row.kind === 'custom'
               ? h(
-                  'div',
+                  'span',
                   { className: 'owc-rowMeta' },
                   `${row.entry.command}${row.entry.args.length > 0 ? ` · ${row.entry.args.join(' ')}` : ''}`,
                 )
               : null,
           ),
-          prefs.defaultApp === row.id ? h('span', { className: 'owc-tag' }, t('manage.defaultTag')) : null,
           h(
-            'button',
-            {
-              type: 'button',
-              className: 'owc-btn owc-btnPlain',
-              disabled: all[0] === undefined || all[0].id === row.id,
-              title: t('manage.moveUp'),
-              'aria-label': t('manage.moveUp'),
-              onClick: () => move(row, -1),
-            },
-            Icon.up(),
-          ),
-          h(
-            'button',
-            {
-              type: 'button',
-              className: 'owc-btn owc-btnPlain',
-              disabled: all[all.length - 1] === undefined || all[all.length - 1].id === row.id,
-              title: t('manage.moveDown'),
-              'aria-label': t('manage.moveDown'),
-              onClick: () => move(row, 1),
-            },
-            Icon.down(),
-          ),
-          h(
-            'button',
-            {
-              type: 'button',
-              className: 'owc-btn',
-              disabled: prefs.defaultApp === row.id,
-              onClick: () => setDefault(row),
-            },
-            t('manage.makeDefault'),
-          ),
-          h(
-            'button',
-            {
-              type: 'button',
-              className: 'owc-btn',
-              disabled: lastVisible,
-              title: lastVisible ? t('manage.keepOne') : undefined,
-              onClick: () => remove(row),
-            },
-            t('manage.remove'),
+            'span',
+            { className: 'owc-rowActions' },
+            h(
+              'button',
+              {
+                type: 'button',
+                className: 'owc-btn owc-btnPlain',
+                disabled: all[0] === undefined || all[0].id === row.id,
+                title: t('manage.moveUp'),
+                'aria-label': t('manage.moveUp'),
+                onClick: () => move(row, -1),
+              },
+              Icon.up(),
+            ),
+            h(
+              'button',
+              {
+                type: 'button',
+                className: 'owc-btn owc-btnPlain',
+                disabled: all[all.length - 1] === undefined || all[all.length - 1].id === row.id,
+                title: t('manage.moveDown'),
+                'aria-label': t('manage.moveDown'),
+                onClick: () => move(row, 1),
+              },
+              Icon.down(),
+            ),
+            // The default row keeps an invisible placeholder, so the move
+            // arrows and the remove button stay in one column across rows.
+            prefs.defaultApp === row.id
+              ? h(
+                  'button',
+                  {
+                    type: 'button',
+                    className: 'owc-btn owc-btnOutline',
+                    'aria-hidden': true,
+                    tabIndex: -1,
+                    style: { visibility: 'hidden' },
+                  },
+                  t('manage.makeDefault'),
+                )
+              : h(
+                  'button',
+                  {
+                    type: 'button',
+                    className: 'owc-btn owc-btnOutline',
+                    onClick: () => setDefault(row),
+                  },
+                  t('manage.makeDefault'),
+                ),
+            h(
+              'button',
+              {
+                type: 'button',
+                className: 'owc-btn owc-btnDanger',
+                disabled: lastVisible,
+                title: lastVisible ? t('manage.keepOne') : undefined,
+                onClick: () => remove(row),
+              },
+              t('manage.remove'),
+            ),
           ),
         );
 
@@ -933,9 +1142,10 @@ window.__ModuleLoader__.load({
           h(
             'div',
             { className: 'owc-head' },
+            h('span', { className: 'owc-headIcon' }, Icon.gear(17)),
             h(
               'div',
-              { style: { flex: 1, minWidth: 0 } },
+              { className: 'owc-headText' },
               h('h2', { className: 'owc-title' }, t('manage.title')),
               h('p', { className: 'owc-sub' }, t('manage.subtitle')),
             ),
@@ -954,64 +1164,74 @@ window.__ModuleLoader__.load({
             'div',
             { className: 'owc-body' },
             h(
-              'label',
-              { className: 'owc-toggle' },
-              h('input', {
-                type: 'checkbox',
-                className: 'owc-toggle-box',
-                checked: prefs.showAll === true,
-                onChange: (event) => commit({ ...prefs, showAll: event.target.checked }),
-              }),
-              h(
-                'span',
-                { className: 'owc-toggle-text' },
-                h('span', { className: 'owc-rowName' }, t('manage.showAll')),
-                h('span', { className: 'owc-note', style: { margin: 0 } }, t('manage.showAllNote')),
-              ),
+              'div',
+              { className: 'owc-hgroup' },
+              h('span', { className: 'owc-hlabel' }, t('manage.visible')),
+              h('span', { className: 'owc-count' }, String(all.length)),
             ),
-            h('div', { className: 'owc-hgroup' }, h('span', { className: 'owc-hlabel' }, t('manage.visible'))),
             all.length === 0
               ? h('p', { className: 'owc-note' }, t('manage.noVisible'))
-              : all.map(rowActions),
+              : h('div', { className: 'owc-list' }, all.map(visibleRow)),
             hidden.length > 0
               ? h(
                   React.Fragment,
                   null,
                   h(
-                    'button',
-                    {
-                      type: 'button',
-                      className: 'owc-btn',
-                      style: { marginTop: 8 },
-                      'aria-expanded': hiddenOpen,
-                      onClick: () => setHiddenOpen((value) => !value),
-                    },
-                    `${hiddenOpen ? '▾' : '▸'} ${t('manage.hidden')} (${hidden.length})`,
+                    'div',
+                    { className: 'owc-hgroup' },
+                    h(
+                      'button',
+                      {
+                        type: 'button',
+                        className: 'owc-disclosure',
+                        'aria-expanded': hiddenOpen,
+                        onClick: () => setHiddenOpen((value) => !value),
+                      },
+                      h('span', { className: 'owc-caret' }, Icon.chevron()),
+                      h('span', {}, t('manage.hidden')),
+                      h('span', { className: 'owc-count' }, String(hidden.length)),
+                    ),
                   ),
                   hiddenOpen
-                    ? hidden.map((row) =>
-                        h(
-                          'div',
-                          { className: 'owc-row', key: row.id },
-                          h('div', { className: 'owc-rowName', style: { flex: 1 } }, row.name),
+                    ? h(
+                        'div',
+                        { className: 'owc-list' },
+                        hidden.map((row) =>
                           h(
-                            'button',
-                            { type: 'button', className: 'owc-btn', onClick: () => show(row) },
-                            t('manage.show'),
-                          ),
-                          row.kind === 'custom' || row.kind === 'system'
-                            ? h(
+                            'div',
+                            { className: 'owc-row', key: row.id },
+                            h(AppGlyph, { icon: row.icon, size: 20 }),
+                            h(
+                              'span',
+                              { className: 'owc-rowMain' },
+                              h('span', { className: 'owc-rowName' }, row.name),
+                              row.kind === 'custom' && row.entry !== undefined
+                                ? h('span', { className: 'owc-rowMeta' }, row.entry.command)
+                                : null,
+                            ),
+                            h(
+                              'span',
+                              { className: 'owc-rowActions' },
+                              h(
                                 'button',
-                                {
-                                  type: 'button',
-                                  className: 'owc-btn owc-btnPlain',
-                                  title: t('manage.removeForever'),
-                                  'aria-label': t('manage.removeForever'),
-                                  onClick: () => removeCustom(row),
-                                },
-                                Icon.close(12),
-                              )
-                            : null,
+                                { type: 'button', className: 'owc-btn owc-btnOutline', onClick: () => show(row) },
+                                t('manage.show'),
+                              ),
+                              row.kind === 'custom' || row.kind === 'system'
+                                ? h(
+                                    'button',
+                                    {
+                                      type: 'button',
+                                      className: 'owc-btn owc-btnPlain owc-btnDanger',
+                                      title: t('manage.removeForever'),
+                                      'aria-label': t('manage.removeForever'),
+                                      onClick: () => removeCustom(row),
+                                    },
+                                    Icon.close(12),
+                                  )
+                                : null,
+                            ),
+                          ),
                         ),
                       )
                     : null,
@@ -1022,23 +1242,35 @@ window.__ModuleLoader__.load({
               : null,
             h('div', { className: 'owc-hgroup' }, h('span', { className: 'owc-hlabel' }, t('manage.addSystem'))),
             h(
+              'button',
+              {
+                type: 'button',
+                className: 'owc-btn owc-btnOutline owc-btnLg owc-addBtn',
+                disabled: snapshot.sysBrowsing,
+                onClick: () => controller.openPicker(t),
+              },
+              Icon.folder(15),
+              h('span', {}, t('manage.addSystemPick')),
+            ),
+            h('p', { className: 'owc-note' }, t('manage.addSystemNote')),
+          ),
+          h(
+            'div',
+            { className: 'owc-foot' },
+            h('span', { className: 'owc-footNote' }, t('manage.footNote')),
+            h(
               'div',
-              { style: { display: 'flex', gap: 8, flexWrap: 'wrap' } },
+              { className: 'owc-footActions' },
               h(
                 'button',
                 {
                   type: 'button',
-                  className: 'owc-btn',
-                  disabled: snapshot.sysBrowsing,
-                  onClick: async () => {
-                    controller.patch({ sysDialogOpen: true });
-                    await controller.browseSystem(t);
-                  },
+                  className: 'owc-btn owc-btnPrimary',
+                  onClick: () => controller.patch({ dialog: false }),
                 },
-                snapshot.sysBrowsing ? t('systemApps.running') : t('manage.addSystemPick'),
+                t('manage.done'),
               ),
             ),
-            h('p', { className: 'owc-note' }, t('manage.addSystemNote')),
           ),
         ),
       );
@@ -1053,97 +1285,206 @@ window.__ModuleLoader__.load({
         return () => clearTimeout(timer);
       }, [notice, controller]);
       if (notice === null) return null;
-      return h(
-        'div',
-        { className: 'owc-toast', role: 'alert', 'data-tone': notice.tone },
-        h('span', {}, notice.text),
-      );
+      return h('div', { className: 'owc-toast', role: 'alert', 'data-tone': notice.tone }, h('span', {}, notice.text));
     }
 
     /** The stylesheet; every color comes from a host theme token. */
     const CSS = `
 .owc-wrap{position:relative;display:inline-flex;flex:none;align-self:center}
 .owc-split{box-sizing:border-box;display:inline-flex;align-items:stretch;height:24px;overflow:hidden;
-  border:.5px solid var(--dsw-alias-border-l4);border-radius:var(--dsw-radius-sm);font-family:var(--dsw-font-family)}
+  border:.5px solid var(--dsw-alias-border-l4);border-radius:var(--dsw-radius-sm);
+  font-family:var(--dsw-font-family);transition:border-color .16s ease-out,background-color .16s ease-out}
+@media (hover:hover){.owc-split:hover{border-color:var(--dsw-alias-border-l3)}}
 .owc-main,.owc-chevron{display:inline-flex;align-items:center;justify-content:center;gap:4px;
-  padding:3px 5px;border:0;background:0 0;color:var(--dsw-alias-label-primary);
-  font-family:inherit;font-size:11px;line-height:16px;white-space:nowrap;cursor:pointer}
+  padding:3px 5px;border:0;background:transparent;color:var(--dsw-alias-label-primary);
+  font-family:inherit;font-size:11px;line-height:16px;white-space:nowrap;cursor:pointer;
+  transition:background-color .16s ease-out,color .16s ease-out}
 .owc-chevron{padding:3px 4px 3px 3px;border-left:.5px solid var(--dsw-alias-border-l4);
   color:var(--dsw-alias-label-secondary)}
 .owc-single{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;padding:0;
-  border:.5px solid var(--dsw-alias-border-l4);border-radius:var(--dsw-radius-sm);background:0 0;
-  color:var(--dsw-alias-label-secondary);cursor:pointer}
+  border:.5px solid var(--dsw-alias-border-l4);border-radius:var(--dsw-radius-sm);background:transparent;
+  color:var(--dsw-alias-label-secondary);cursor:pointer;
+  transition:background-color .16s ease-out,color .16s ease-out}
 @media (hover:hover){
-  .owc-main:hover:not(:disabled),.owc-chevron:hover:not(:disabled),.owc-single:hover{background:var(--dsw-alias-interactive-bg-hover)}
+  .owc-main:hover:not(:disabled),.owc-chevron:hover:not(:disabled),.owc-single:hover{
+    background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}
 }
-.owc-main:disabled,.owc-chevron:disabled{cursor:default;opacity:.6}
-.owc-main:focus-visible,.owc-chevron:focus-visible,.owc-single:focus-visible{background:var(--dsw-alias-interactive-bg-hover);outline:none}
-.owc-icon{width:13px;height:13px;object-fit:contain;flex:none}
-.owc-menu{position:fixed;z-index:1200;min-width:248px;overflow-y:auto;padding:4px;
-  border:.5px solid var(--dsw-alias-border-l2);border-radius:var(--dsw-radius-md);
+.owc-main:active:not(:disabled),.owc-chevron:active:not(:disabled),.owc-single:active{
+  background:var(--dsw-alias-interactive-bg-active)}
+.owc-main:disabled,.owc-chevron:disabled{cursor:default;opacity:.45}
+.owc-main:focus-visible,.owc-chevron:focus-visible,.owc-single:focus-visible{
+  background:var(--dsw-alias-interactive-bg-hover);outline:none}
+.owc-icon{object-fit:contain;flex:none;display:block}
+.owc-glyph{display:inline-grid;place-items:center;flex:none;color:var(--dsw-alias-label-secondary)}
+.owc-menu{position:fixed;z-index:1200;min-width:232px;padding:4px;overflow-y:auto;
+  border:.5px solid var(--dsw-alias-border-l2);border-radius:var(--dsw-radius-lg);
   background:var(--dsw-alias-bg-overlay);box-shadow:var(--dsw-elevation-prominent);
+  font-family:var(--dsw-font-family);
   --dsw-scrollbar-thumb:var(--dsw-alias-scrollbar-bg-l2);
   --dsw-scrollbar-thumb-hover:var(--dsw-alias-scrollbar-hover-l2)}
-.owc-item{display:flex;align-items:center;gap:8px;width:100%;padding:6px 8px;border:0;
-  border-radius:var(--dsw-radius-sm);background:0 0;color:var(--dsw-alias-label-primary);
-  font-family:inherit;font-size:12px;line-height:18px;text-align:left;cursor:pointer}
+.owc-menuLabel{padding:6px 8px 4px;color:var(--dsw-alias-label-tertiary);
+  font-size:11px;line-height:16px;letter-spacing:.02em}
+.owc-item{display:flex;align-items:center;gap:8px;width:100%;min-height:32px;padding:5px 8px;border:0;
+  border-radius:var(--dsw-radius-md);background:transparent;color:var(--dsw-alias-label-primary);
+  font-family:inherit;font-size:13px;line-height:20px;text-align:left;cursor:pointer;
+  transition:background-color .12s ease-out}
 @media (hover:hover){.owc-item:hover{background:var(--dsw-alias-interactive-bg-hover)}}
+.owc-item:active{background:var(--dsw-alias-interactive-bg-active)}
+.owc-item:focus-visible{background:var(--dsw-alias-interactive-bg-hover);outline:none}
+.owc-item[aria-checked="true"] .owc-itemName{font-weight:500}
 .owc-itemName{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.owc-itemHint{color:var(--dsw-alias-label-secondary);font-size:11px}
-.owc-sep{height:1px;margin:4px 6px;background:var(--dsw-alias-border-l1)}
-.owc-mark{display:inline-flex;align-items:center;justify-content:center;width:12px;flex:none;
-  color:var(--dsw-alias-brand-primary)}
+.owc-itemHint{flex:none;color:var(--dsw-alias-label-tertiary);font-size:11px;line-height:16px}
+.owc-sep{height:1px;margin:4px 8px;background:var(--dsw-alias-border-l1)}
+.owc-mark{display:inline-grid;place-items:center;flex:none;width:12px;color:var(--dsw-alias-brand-primary)}
 .owc-overlay{position:fixed;inset:0;z-index:1200;display:flex;align-items:center;justify-content:center;
   padding:24px;background:var(--dsw-alias-bg-mask-1);backdrop-filter:var(--dsw-mask-blur);pointer-events:auto}
-.owc-dialog{box-sizing:border-box;display:flex;flex-direction:column;width:600px;max-width:calc(100vw - 48px);
+.owc-dialog{box-sizing:border-box;display:flex;flex-direction:column;width:560px;max-width:calc(100vw - 48px);
   max-height:min(720px,calc(100vh - 96px));border-radius:var(--dsw-radius-panel);
-  background:var(--dsw-alias-bg-layer-2);box-shadow:var(--dsw-elevation-prominent);overflow:hidden}
-.owc-head{display:flex;align-items:flex-start;gap:8px;padding:18px 16px 10px 20px}
-.owc-title{margin:0;color:var(--dsw-alias-label-primary);font-size:15px;font-weight:500;line-height:22px}
+  background:var(--dsw-alias-bg-layer-2);box-shadow:var(--dsw-elevation-prominent);overflow:hidden;
+  font-family:var(--dsw-font-family);color:var(--dsw-alias-label-primary)}
+.owc-dialogWide{width:620px;min-height:min(568px,calc(100vh - 96px))}
+.owc-head{display:flex;align-items:flex-start;gap:12px;padding:22px 20px 14px}
+.owc-headIcon{display:grid;place-items:center;flex:none;width:34px;height:34px;
+  border-radius:var(--dsw-radius-md);background:var(--dsw-alias-interactive-bg-hover);
+  color:var(--dsw-alias-label-secondary)}
+.owc-headText{flex:1;min-width:0}
+.owc-title{margin:0;color:var(--dsw-alias-label-primary);font-size:16px;font-weight:500;line-height:24px}
 .owc-sub{margin:2px 0 0;color:var(--dsw-alias-label-secondary);font-size:12px;line-height:18px}
-.owc-close{display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;padding:0;
-  border:0;border-radius:var(--dsw-radius-sm);background:0 0;color:var(--dsw-alias-label-primary);cursor:pointer}
-@media (hover:hover){.owc-close:hover{background:var(--dsw-alias-interactive-bg-hover)}}
-.owc-body{flex:1;min-height:0;overflow-y:auto;padding:4px 20px 18px;
+.owc-close{display:inline-flex;align-items:center;justify-content:center;flex:none;width:28px;height:28px;
+  padding:0;border:0;border-radius:var(--dsw-radius-sm);background:transparent;
+  color:var(--dsw-alias-label-secondary);cursor:pointer;transition:background-color .12s ease-out,color .12s ease-out}
+@media (hover:hover){.owc-close:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}}
+.owc-close:focus-visible{background:var(--dsw-alias-interactive-bg-hover);outline:none}
+.owc-toolbar{display:flex;align-items:center;gap:8px;padding:0 20px 4px}
+.owc-search{position:relative;display:flex;align-items:center;flex:1;min-width:0}
+.owc-search svg{position:absolute;left:9px;color:var(--dsw-alias-label-tertiary);pointer-events:none}
+.owc-input{box-sizing:border-box;width:100%;height:32px;margin:0;padding:0 10px 0 29px;
+  border:.5px solid var(--dsw-alias-border-l3);border-radius:var(--dsw-radius-sm);
+  background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary);
+  font-family:inherit;font-size:13px;line-height:20px;outline:none;
+  transition:border-color .12s ease-out,box-shadow .12s ease-out}
+.owc-input::placeholder{color:var(--dsw-alias-label-tertiary)}
+.owc-input:focus{border-color:var(--dsw-alias-state-business-primary);
+  box-shadow:0 0 0 3px color-mix(in srgb,var(--dsw-alias-state-business-primary) 14%,transparent)}
+.owc-chip{display:inline-flex;align-items:center;justify-content:center;gap:6px;flex:none;height:32px;
+  padding:0 10px;border:.5px solid transparent;border-radius:var(--dsw-radius-sm);background:transparent;
+  box-shadow:inset 0 0 0 .5px var(--dsw-alias-border-l3);color:var(--dsw-alias-label-primary);
+  font-family:inherit;font-size:12px;line-height:18px;white-space:nowrap;cursor:pointer;
+  transition:background-color .12s ease-out,box-shadow .12s ease-out}
+@media (hover:hover){.owc-chip:hover{background:var(--dsw-alias-interactive-bg-hover)}}
+.owc-chip:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary);outline-offset:1px}
+.owc-chip[aria-pressed="true"]{background:var(--dsw-alias-button-ghost-active-fill);
+  box-shadow:inset 0 0 0 .5px var(--dsw-alias-button-ghost-active-border)}
+.owc-chip svg{color:var(--dsw-alias-label-secondary)}
+.owc-body{flex:1;min-height:0;overflow-y:auto;padding:0 20px 16px;
   --dsw-scrollbar-thumb:var(--dsw-alias-scrollbar-bg-l2);
   --dsw-scrollbar-thumb-hover:var(--dsw-alias-scrollbar-hover-l2)}
-.owc-row{display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:.5px solid var(--dsw-alias-border-l1)}
-.owc-row:last-child{border-bottom:0}
+.owc-list{display:flex;flex-direction:column;gap:1px}
+.owc-row{display:flex;align-items:center;gap:10px;box-sizing:border-box;width:100%;
+  padding:8px 10px;border:.5px solid transparent;border-radius:var(--dsw-radius-md);
+  transition:background-color .12s ease-out,border-color .12s ease-out}
+@media (hover:hover){.owc-row:hover{background:var(--dsw-alias-interactive-bg-hover);
+  border-color:var(--dsw-alias-border-l1)}}
+.owc-pickRow{cursor:pointer;user-select:none}
+.owc-pickRow[data-picked="true"]{background:var(--dsw-alias-interactive-bg-hover)}
+.owc-pickRow[data-added="true"]{cursor:default}
+@media (hover:hover){.owc-pickRow[data-added="true"]:hover{background:transparent;
+  border-color:transparent}}
+.owc-pickRow[data-added="true"] .owc-rowName{color:var(--dsw-alias-label-secondary)}
+.owc-rowMain{display:flex;flex-direction:column;gap:1px;flex:1;min-width:0}
+.owc-rowTitle{display:flex;align-items:center;gap:6px;min-width:0}
 .owc-rowName{color:var(--dsw-alias-label-primary);font-size:13px;line-height:20px;
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.owc-rowMeta{color:var(--dsw-alias-label-secondary);font-size:11px;line-height:16px;
-  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.owc-btn{display:inline-flex;align-items:center;justify-content:center;gap:4px;height:26px;padding:0 10px;
-  border:.5px solid var(--dsw-alias-border-l2);border-radius:var(--dsw-radius-sm);background:0 0;
-  color:var(--dsw-alias-label-primary);font-family:inherit;font-size:12px;cursor:pointer;flex:none}
+.owc-rowMeta{color:var(--dsw-alias-label-tertiary);font-size:11px;line-height:15px;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  direction:rtl;text-align:left;unicode-bidi:plaintext}
+.owc-rowActions{display:flex;align-items:center;gap:2px;flex:none}
+.owc-btn{display:inline-flex;align-items:center;justify-content:center;gap:5px;flex:none;height:28px;
+  padding:0 10px;border:.5px solid transparent;border-radius:var(--dsw-radius-sm);background:transparent;
+  color:var(--dsw-alias-label-primary);font-family:inherit;font-size:12px;line-height:18px;
+  white-space:nowrap;cursor:pointer;
+  transition:background-color .12s ease-out,color .12s ease-out,box-shadow .12s ease-out,opacity .12s ease-out}
 @media (hover:hover){.owc-btn:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover)}}
-.owc-btn:disabled{opacity:.45;cursor:default}
-.owc-btnPlain{width:24px;height:24px;padding:0;border:0}
-.owc-tag{padding:1px 6px;border-radius:var(--dsw-radius-xs);background:var(--dsw-alias-interactive-bg-hover);
+.owc-btn:active:not(:disabled){background:var(--dsw-alias-interactive-bg-active)}
+.owc-btn:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary);outline-offset:1px}
+.owc-btn:disabled{cursor:not-allowed;opacity:.4}
+.owc-btnOutline{box-shadow:inset 0 0 0 .5px var(--dsw-alias-border-l3)}
+.owc-btnLg{height:32px;padding:0 12px;font-size:13px;line-height:20px}
+.owc-btnPrimary{background:var(--dsw-alias-button-primary-fill);
+  color:var(--dsw-alias-label-primary-foreground)}
+@media (hover:hover){.owc-btnPrimary:hover:not(:disabled){background:var(--dsw-alias-button-primary-hover)}}
+.owc-btnPlain{width:26px;height:26px;padding:0;color:var(--dsw-alias-label-secondary)}
+@media (hover:hover){.owc-btnPlain:hover:not(:disabled){color:var(--dsw-alias-label-primary)}}
+.owc-btnDanger{color:var(--dsw-alias-label-secondary)}
+@media (hover:hover){
+  .owc-btnDanger:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover-danger);
+    color:var(--dsw-alias-label-error)}
+}
+.owc-addBtn{align-self:flex-start;color:var(--dsw-alias-label-primary)}
+.owc-addBtn svg{color:var(--dsw-alias-label-secondary)}
+.owc-tag{padding:1px 7px;border-radius:999px;background:var(--dsw-alias-interactive-bg-hover);
   color:var(--dsw-alias-label-secondary);font-size:11px;line-height:16px;flex:none}
-.owc-hgroup{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:16px 0 6px}
-.owc-hlabel{color:var(--dsw-alias-label-secondary);font-size:11px;font-weight:500;letter-spacing:.04em;
-  text-transform:uppercase}
-.owc-field{display:flex;flex-direction:column;gap:4px;margin-bottom:10px}
-.owc-label{color:var(--dsw-alias-label-secondary);font-size:12px}
-.owc-input{box-sizing:border-box;width:100%;height:30px;padding:0 8px;border:.5px solid var(--dsw-alias-border-l2);
-  border-radius:var(--dsw-radius-sm);background:var(--dsw-alias-bg-layer-1);
-  color:var(--dsw-alias-label-primary);font-family:var(--dsw-font-mono,monospace);font-size:12px}
-.owc-input:focus{outline:none;border-color:var(--dsw-alias-brand-primary)}
-.owc-note{margin:6px 0 0;color:var(--dsw-alias-label-secondary);font-size:11px;line-height:16px}
+.owc-tagDefault{background:var(--dsw-alias-interactive-bg-active);color:var(--dsw-alias-label-primary)}
+.owc-check{appearance:none;-webkit-appearance:none;flex:none;width:16px;height:16px;margin:0;
+  position:relative;border:.5px solid var(--dsw-alias-border-l4);border-radius:var(--dsw-radius-xs);
+  background:var(--dsw-alias-bg-layer-1);cursor:pointer;
+  transition:background-color .12s ease-out,border-color .12s ease-out}
+.owc-check:hover:not(:disabled){border-color:var(--dsw-alias-border-l3)}
+.owc-check:checked{background:var(--dsw-alias-brand-primary);border-color:var(--dsw-alias-brand-primary)}
+.owc-check:checked::after{content:"";position:absolute;left:5px;top:1.5px;width:4px;height:8px;
+  border:solid var(--dsw-alias-label-primary-foreground);border-width:0 1.6px 1.6px 0;transform:rotate(45deg)}
+.owc-check:disabled{cursor:default}
+.owc-check:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary);outline-offset:1px}
+.owc-hgroup{display:flex;align-items:center;gap:8px;padding:18px 0 8px}
+.owc-hlabel{color:var(--dsw-alias-label-secondary);font-size:11px;font-weight:500;
+  letter-spacing:.04em;text-transform:uppercase}
+.owc-count{padding:0 6px;border-radius:999px;background:var(--dsw-alias-interactive-bg-hover);
+  color:var(--dsw-alias-label-tertiary);font-size:11px;line-height:16px}
+.owc-disclosure{display:inline-flex;align-items:center;gap:6px;height:26px;padding:0 8px 0 6px;border:0;
+  border-radius:var(--dsw-radius-sm);background:transparent;color:var(--dsw-alias-label-secondary);
+  font-family:inherit;font-size:12px;line-height:18px;cursor:pointer;
+  transition:background-color .12s ease-out,color .12s ease-out}
+@media (hover:hover){.owc-disclosure:hover{background:var(--dsw-alias-interactive-bg-hover);
+  color:var(--dsw-alias-label-primary)}}
+.owc-disclosure:focus-visible{outline:none;background:var(--dsw-alias-interactive-bg-hover)}
+.owc-caret{display:inline-grid;place-items:center;flex:none;transform:rotate(-90deg);
+  transition:transform .16s ease-out}
+.owc-disclosure[aria-expanded="true"] .owc-caret{transform:none}
+.owc-note{margin:6px 2px 0;color:var(--dsw-alias-label-secondary);font-size:11.5px;line-height:17px}
+.owc-empty{display:flex;flex-direction:column;align-items:center;gap:8px;padding:28px 16px 24px;text-align:center}
+.owc-emptyIcon{display:grid;place-items:center;width:36px;height:36px;border-radius:var(--dsw-radius-md);
+  background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-tertiary)}
+.owc-emptyText{margin:0;color:var(--dsw-alias-label-secondary);font-size:12px;line-height:18px;
+  max-width:340px}
+.owc-emptyHint{margin:-2px 0 0;color:var(--dsw-alias-label-tertiary);font-size:11px;line-height:16px;
+  max-width:340px}
+.owc-spinner{width:16px;height:16px;border:1.5px solid var(--dsw-alias-border-l3);
+  border-top-color:var(--dsw-alias-label-secondary);border-radius:50%;
+  animation:owc-spin .75s linear infinite}
+@keyframes owc-spin{to{transform:rotate(1turn)}}
+.owc-foot{display:flex;align-items:center;justify-content:space-between;gap:12px;
+  padding:14px 20px 16px;border-top:.5px solid var(--dsw-alias-border-l1);
+  background:var(--dsw-alias-bg-layer-2)}
+.owc-footNote{min-width:0;color:var(--dsw-alias-label-tertiary);font-size:11px;line-height:16px;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.owc-footActions{display:flex;align-items:center;gap:8px;flex:none}
 .owc-toast{position:fixed;left:50%;top:var(--dsh-frame-overlay-top,24px);transform:translateX(-50%);
   z-index:1300;display:flex;align-items:center;gap:8px;max-width:min(440px,calc(100vw - 48px));
   padding:8px 14px;border-radius:var(--dsw-radius-md);border:.5px solid var(--dsw-alias-border-l2);
   background:var(--dsw-alias-bg-overlay);box-shadow:var(--dsw-elevation-prominent);
-  color:var(--dsw-alias-label-primary);font-size:12px;pointer-events:auto}
-.owc-toast[data-tone="error"]{color:var(--dsw-alias-state-error-primary)}
-.owc-toggle{display:flex;align-items:flex-start;gap:10px;margin:8px 0 4px;padding:8px 10px;border-radius:var(--dsw-radius-sm);cursor:pointer;user-select:none}
-@media (hover:hover){.owc-toggle:hover{background:var(--dsw-alias-interactive-bg-hover)}}
-.owc-toggle-box{appearance:none;-webkit-appearance:none;flex:none;width:16px;height:16px;margin:2px 0 0;border:1px solid var(--dsw-alias-border-l2);border-radius:4px;background:var(--dsw-alias-bg-layer-1);cursor:pointer;position:relative}
-.owc-toggle-box:checked{background:var(--dsw-alias-brand-primary);border-color:var(--dsw-alias-brand-primary)}
-.owc-toggle-box:checked::after{content:"";position:absolute;left:4px;top:1px;width:4px;height:9px;border:solid var(--dsw-alias-bg-layer-1);border-width:0 2px 2px 0;transform:rotate(45deg)}
-.owc-toggle-box:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:2px}
-.owc-toggle-text{display:flex;flex-direction:column;gap:2px;min-width:0}
+  color:var(--dsw-alias-label-primary);font-size:12px;line-height:18px;pointer-events:auto}
+.owc-toast[data-tone="error"]{color:var(--dsw-alias-label-error)}
+@media (prefers-reduced-motion:no-preference){
+  .owc-menu{animation:owc-pop .12s ease-out}
+  .owc-overlay{animation:owc-fade .16s ease-out}
+  .owc-dialog{animation:owc-rise .18s cubic-bezier(.2,0,0,1)}
+  @keyframes owc-pop{from{opacity:0;transform:translateY(-4px) scale(.98)}to{opacity:1;transform:none}}
+  @keyframes owc-fade{from{opacity:0}to{opacity:1}}
+  @keyframes owc-rise{from{opacity:0;transform:translateY(8px) scale(.995)}to{opacity:1;transform:none}}
+}
+@media (prefers-reduced-motion:reduce){
+  .owc-spinner{animation:none}
+}
 `;
 
     /** Dictionaries; Chinese is the key-set source of truth, English is complete. */
@@ -1154,13 +1495,14 @@ window.__ModuleLoader__.load({
         'action.openIn': '用 {app} 打开',
         'action.more': '更多打开方式',
         'action.manage': '管理打开方式…',
+        'action.menuLabel': '打开方式',
         'action.defaultTag': '默认',
         'manage.title': '打开方式',
         'manage.subtitle': '选择会话头部菜单里出现哪些应用，并决定它们的顺序与默认项。',
         'manage.close': '关闭',
+        'manage.done': '完成',
+        'manage.footNote': '更改会立即保存。',
         'manage.visible': '菜单中的应用',
-        'manage.showAll': '显示全部应用（包括非开发工具）',
-        'manage.showAllNote': '默认只列出开发工具。打开后，Program Files 与用户目录下的所有应用都会出现，列表会变长、加载也更慢。',
         'manage.hidden': '已移除',
         'manage.defaultTag': '默认',
         'manage.moveUp': '上移',
@@ -1174,18 +1516,26 @@ window.__ModuleLoader__.load({
         'manage.noVisible': '菜单中暂时没有应用。',
         'manage.addSystem': '添加系统应用',
         'manage.addSystemPick': '打开应用目录，选择应用…',
-        'manage.addSystemNote':
-          '点击打开系统应用目录，勾选已安装的应用加入打开方式菜单（带图标）。',
+        'manage.addSystemNote': '默认只显示白名单里的开发工具，可在目录里切换到本机全部应用。',
         'systemApps.title': '选择已安装的应用',
-        'systemApps.subtitle': '系统应用目录中的应用，勾选后加入打开方式菜单。',
-        'systemApps.filterPlaceholder': '筛选应用…',
-        'systemApps.found': '已安装的应用',
-        'systemApps.running': '正在读取…',
+        'systemApps.subtitle': '勾选后加入「打开方式」菜单，可在菜单里随时移除。',
+        'systemApps.filterPlaceholder': '搜索应用…',
+        'systemApps.found': '白名单应用',
+        'systemApps.foundAll': '本机全部应用',
+        'systemApps.showAll': '显示全部应用',
+        'systemApps.showWhitelist': '只看白名单',
+        'systemApps.running': '正在读取应用目录…',
         'systemApps.none': '没有检测到已安装的应用。',
+        'systemApps.noneWhitelist': '白名单里没有匹配的已安装应用。',
+        'systemApps.noneWhitelistHint': '点上方的「显示全部应用」查看本机全部应用。',
+        'systemApps.countAll': '共 {n} 个应用',
+        'systemApps.noMatch': '没有匹配「{query}」的应用。',
         'systemApps.failed': '读取应用列表失败',
         'systemApps.tagAdded': '已添加',
-        'systemApps.tagNew': '新添加',
         'systemApps.addSelected': '添加所选',
+        'systemApps.cancel': '取消',
+        'systemApps.selected': '已选 {n} 个应用',
+        'systemApps.footHint': '白名单只包含常用开发工具。',
         'notice.openFailed': '打开 {app} 失败',
         'notice.noTarget': '当前会话还没有工作目录',
         'preferences.notSaved': '偏好未能保存到主机',
@@ -1197,14 +1547,15 @@ window.__ModuleLoader__.load({
         'action.openIn': 'Open in {app}',
         'action.more': 'More ways to open',
         'action.manage': 'Manage open with…',
+        'action.menuLabel': 'Open with',
         'action.defaultTag': 'default',
         'manage.title': 'Open with',
         'manage.subtitle':
           'Choose which applications the session header menu offers, and set their order and default.',
         'manage.close': 'Close',
+        'manage.done': 'Done',
+        'manage.footNote': 'Changes are saved immediately.',
         'manage.visible': 'In the menu',
-        'manage.showAll': 'Show all applications (not just developer tools)',
-        'manage.showAllNote': 'By default only developer tools are listed. Turning this on lists every application under Program Files and the per-user folders, which makes the list longer and slower to load.',
         'manage.hidden': 'Removed',
         'manage.defaultTag': 'Default',
         'manage.moveUp': 'Move up',
@@ -1219,17 +1570,26 @@ window.__ModuleLoader__.load({
         'manage.addSystem': 'Add system application',
         'manage.addSystemPick': 'Open applications folder, pick apps…',
         'manage.addSystemNote':
-          'Open the system applications folder and check installed applications (with icons) to add them to the Open with menu.',
+          'The allowlist shows developer tools by default; switch to every application inside the folder.',
         'systemApps.title': 'Pick installed applications',
-        'systemApps.subtitle': 'Applications in the system folder; checked ones join the Open with menu.',
-        'systemApps.filterPlaceholder': 'Filter applications…',
-        'systemApps.found': 'Installed applications',
-        'systemApps.running': 'Reading…',
+        'systemApps.subtitle': 'Checked applications join the Open with menu and can be removed there later.',
+        'systemApps.filterPlaceholder': 'Search applications…',
+        'systemApps.found': 'Whitelisted applications',
+        'systemApps.foundAll': 'Every application on this host',
+        'systemApps.showAll': 'Show all applications',
+        'systemApps.showWhitelist': 'Whitelist only',
+        'systemApps.running': 'Reading the applications folder…',
         'systemApps.none': 'No installed application was detected.',
+        'systemApps.noneWhitelist': 'No installed application matches the whitelist.',
+        'systemApps.noneWhitelistHint': 'Use "Show all applications" above to browse this host.',
+        'systemApps.countAll': '{n} applications',
+        'systemApps.noMatch': 'No application matches "{query}".',
         'systemApps.failed': 'Failed to read applications',
         'systemApps.tagAdded': 'Added',
-        'systemApps.tagNew': 'New',
         'systemApps.addSelected': 'Add selected',
+        'systemApps.cancel': 'Cancel',
+        'systemApps.selected': '{n} selected',
+        'systemApps.footHint': 'The whitelist only covers common developer tools.',
         'notice.openFailed': 'Could not open {app}',
         'notice.noTarget': 'This session has no working directory yet',
         'preferences.notSaved': 'Preferences were not saved on the host',

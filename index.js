@@ -160,8 +160,6 @@ function sanitizeState(input) {
       typeof source.defaultApp === 'string' && source.defaultApp.length <= 120
         ? source.defaultApp
         : null,
-    // Off by default: the Open with menu offers developer tools only.
-    showAll: source.showAll === true,
     custom,
   };
 }
@@ -339,6 +337,10 @@ async function applicationIconDataUrl(platform, appPath) {
  * the display name, the absolute launch path, and a PNG data-URL icon when the
  * platform can supply one. macOS reads `.app` bundles; Windows reads `.exe`
  * files one level deep under the two Program Files directories.
+ *
+ * Both platforms default to the developer allowlist: the picker opens on the
+ * applications a coding session actually opens directories with, and only
+ * `showAll` lifts that filter to everything installed.
  */
 async function listSystemApplications(platform, { showAll = false } = {}) {
   const dirs = SYSTEM_APP_DIRS[platform] ?? [];
@@ -358,6 +360,8 @@ async function listSystemApplications(platform, { showAll = false } = {}) {
       if (!entry.isDirectory() || !name.endsWith('.app')) continue;
       const display = name.slice(0, -'.app'.length);
       if (display === '') continue;
+      // Default view: developer tools only. "Show all" lifts the allowlist.
+      if (!showAll && !isDeveloperApp(display, display)) continue;
       const path = join(dir, name);
       if (!seen.has(path)) seen.set(path, { id: path, label: display, path, icon: null });
     }
@@ -674,8 +678,11 @@ export function apply(ctx) {
             sendMethodNotAllowed(res, 'GET');
             return;
           }
-          const state = await read();
-          sendJson(res, 200, await listSystemApplications(process.platform, { showAll: state.showAll }));
+          // ?all=1 lists every application for this request only; the picker's
+          // toggle is a view state, never part of the saved preference.
+          const query = new URL(String(req.url), 'http://localhost').searchParams;
+          const showAll = query.get('all') === '1';
+          sendJson(res, 200, await listSystemApplications(process.platform, { showAll }));
         },
       }),
     `open-with-control: ${SYSTEM_APPS_ROUTE}`,

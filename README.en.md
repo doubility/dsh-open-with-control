@@ -13,7 +13,7 @@ DeepSeek Harness ships an "Open In…" split button in the session header that o
 - **Choose what appears** — remove applications you never use; restore them later from a collapsed *Removed* section
 - **Reorder** — move entries up and down; the menu follows your order
 - **Pin a default** — the main button uses it; selecting an application in the menu also makes it the default
-- **Add installed applications** — open the system applications folder and pick from what is actually installed, icons included
+- **Add installed applications** — open the applications folder; only allowlisted developer tools are listed by default, one button switches to everything installed (and back)
 - **Real icons** — `.icns` on macOS, extracted executable icons on Windows
 - **Localized** — Simplified Chinese and English
 - **Safe floor** — at least one application always stays in the menu
@@ -21,6 +21,10 @@ DeepSeek Harness ships an "Open In…" split button in the session header that o
 The management panel:
 
 ![The management panel: applications in the menu with reorder and remove controls, a collapsed removed section, and the system application picker](assets/manage.png)
+
+The applications folder lists allowlisted applications first, with one button for everything installed:
+
+![The application picker: allowlisted applications with added entries tagged, and a Show all applications toggle at the top right](assets/picker.png)
 
 ## Requirements
 
@@ -49,7 +53,7 @@ Click the chevron next to the Open with button, then **Manage open with…**:
 |---|---|
 | *In the menu* | Reorder with the arrows, set the default, remove an entry |
 | *Removed* | Collapsed by default; restore an entry, or delete a user-added one permanently |
-| *Add system application* | **Open applications folder, pick apps…** lists what this machine has installed (with icons); check the ones you want |
+| *Add system application* | **Open applications folder, pick apps…** lists allowlisted applications (with icons) by default; **Show all applications** switches to everything installed and **Whitelist only** switches back; check the ones you want |
 
 Selecting an application in the header menu both opens the directory with it **and** makes it the new default.
 
@@ -61,7 +65,8 @@ The plugin registers its own control into `conversation.session.header.utilities
 |---|---|
 | `GET/POST /open-with-control/state` | Read or replace the stored preference document |
 | `POST /open-with-control/open` | Launch a user-added application on a directory |
-| `GET /open-with-control/system-apps` | List installed applications for the picker |
+| `GET /open-with-control/system-apps` | List allowlisted installed applications for the picker |
+| `GET /open-with-control/system-apps?all=1` | The same list without the allowlist filter |
 | `POST /open-with-control/system-open` | Launch an installed application on a directory |
 | `GET /open-with-control/system-icon?path=…` | Serve one application's icon as PNG |
 
@@ -71,7 +76,7 @@ All routes sit behind the deployment's connection trust fence. Preferences live 
 
 ### macOS
 
-- Applications are `.app` bundles discovered under `/Applications` and `~/Applications`
+- Applications are `.app` bundles discovered under `/Applications` and `~/Applications`, filtered by the developer allowlist (editors and IDEs, terminals, Git clients, database and API tools, container runtimes, network inspectors, image editors) unless the picker asks for everything
 - Icons come from each bundle's `CFBundleIconFile` via `plutil` + `sips`
 - Launching uses `open -a <bundle> <directory>`, so the application receives the directory
 
@@ -96,7 +101,7 @@ Not supported yet: the application picker has no Linux discovery, so it reports 
 
 - **Catalog applications cannot be deleted, only removed.** The host re-discovers installed editors, terminals, and file managers on every load, so removing one records it as removed rather than dropping it; this is what *Restored* restores. Applications you added yourself are truly deleted.
 - **The installed-application list is read on demand.** An application installed while the page is open appears after reopening the picker.
-- **The system application list is not filtered by relevance.** Every bundle/executable found is offered.
+- **The allowlist is a fixed developer-tool list.** The default view only knows the applications in it; anything else (including applications you install later) is reachable after switching the picker to **Show all applications**.
 
 ## Development
 
