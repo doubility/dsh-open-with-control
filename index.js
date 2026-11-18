@@ -338,10 +338,7 @@ async function applicationIconDataUrl(platform, appPath) {
 async function listSystemApplications(platform) {
   const dirs = SYSTEM_APP_DIRS[platform] ?? [];
   if (platform === 'win32') {
-    // Windows installs live several levels deep under each root.
-    const budget = { remaining: 4000, seen: new Map() };
-    for (const dir of dirs) await collectWindowsExecutables(dir, 3, budget);
-    return [...budget.seen.values()].sort((a, b) => a.label.localeCompare(b.label));
+    return listWindowsApplications(dirs);
   }
   const seen = new Map();
   for (const dir of dirs) {
@@ -375,31 +372,80 @@ async function systemApplicationIcon(platform, appPath) {
   return dataUrl;
 }
 
+/** Folder names under Program Files that hold command-line toolchains, not applications. */
+const WINDOWS_TOOLCHAIN_DIRS = new Set([
+  'git', 'msys2', 'msys', 'mingw64', 'mingw32', 'cygwin', 'nodejs', 'python', 'go',
+  'windows kits', 'dotnet', 'microsoft sdks', 'microsoft visual studio', 'dart-sdk',
+  'java', 'jdk', 'openjdk', 'php', 'ruby', 'rustup', 'cmake', 'llvm', 'mysql', 'postgresql',
+]);
+
+/** Executables that are installers, uninstallers, updaters or helpers, not applications. */
+const WINDOWS_HELPER_PATTERN = /^(unins\d*|uninstall|uninst|setup|install|update|updater|helper|crash|crashpad|vc_?redist|dotnet|msiexec|elevat|svc|service|launcher_?helper|bin_|pythonw$|javaw$|wscript|cscript|rundll|conhost|cmd$|powershell$|pwsh$)/i;
+
+/** Largest number of directory entries one application root may examine. */
+const WINDOWS_ROOT_BUDGET = 1500;
+
 /**
- * Walk one directory tree for Windows executables, bounded by depth and total
- * entries so a huge Program Files tree cannot stall the request.
+ * How many folder levels below a Program Files root to search. Three covers the
+ * common layouts (`App\bin\app.exe`, `Vendor\App\app.exe`, `Vendor\App\Application\app.exe`).
  */
-async function collectWindowsExecutables(root, depth, budget) {
-  if (depth < 0 || budget.remaining <= 0) return;
-  let entries;
-  try {
-    entries = await readdir(root, { withFileTypes: true });
-  } catch {
-    return;
-  }
-  for (const entry of entries) {
-    if (budget.remaining <= 0) return;
-    budget.remaining -= 1;
-    const full = join(root, entry.name);
-    if (entry.isFile() && extname(entry.name).toLowerCase() === '.exe') {
-      const display = entry.name.slice(0, -'.exe'.length);
-      if (display !== '' && !budget.seen.has(full)) {
-        budget.seen.set(full, { id: full, label: display, path: full, icon: null });
+const WINDOWS_MAX_DEPTH = 3;
+
+/** Whether one executable name is a plausible application entry point. */
+function isWindowsApplicationExe(fileName) {
+  const display = fileName.slice(0, -'.exe'.length);
+  if (display.length < 3) return false; // one- or two-letter names are CLI shims
+  return !WINDOWS_HELPER_PATTERN.test(display);
+}
+
+/**
+ * List GUI applications under each Program Files root. An application is an
+ * executable sitting directly in a root's first-level folder (for example
+ * `Microsoft VS Code\Code.exe`) or in a folder one level below it. Toolchain
+ * folders and helper executables are skipped. Every root gets its own budget,
+ * so one large tree cannot starve the others.
+ */
+async function listWindowsApplications(roots) {
+  const found = new Map();
+  for (const root of roots) {
+    const perRoot = { remaining: WINDOWS_ROOT_BUDGET };
+    // Breadth-first by depth: depth 1 (the root's own executables) and depth 2
+    // (its folders' executables) are always collected before depth 3 and below
+    // compete for the remaining budget. Chrome and Office sit at depth 3+.
+    let frontier = [root];
+    for (let depth = 0; depth <= WINDOWS_MAX_DEPTH && frontier.length > 0; depth += 1) {
+      const next = [];
+      for (const dir of frontier) {
+        if (perRoot.remaining <= 0) break;
+        let children;
+        try {
+          children = await readdir(dir, { withFileTypes: true });
+        } catch {
+          continue;
+        }
+        for (const child of children) {
+          if (perRoot.remaining <= 0) break;
+          perRoot.remaining -= 1;
+          const full = join(dir, child.name);
+          if (child.isFile() && extname(child.name).toLowerCase() === '.exe') {
+            if (isWindowsApplicationExe(child.name)) addWindowsApp(found, full, child.name);
+          } else if (child.isDirectory() && depth < WINDOWS_MAX_DEPTH) {
+            if (WINDOWS_TOOLCHAIN_DIRS.has(child.name.toLowerCase())) continue;
+            next.push(full);
+          }
+        }
       }
-    } else if (entry.isDirectory()) {
-      await collectWindowsExecutables(full, depth - 1, budget);
+      frontier = next;
     }
   }
+  return [...found.values()].sort((a, b) => a.label.localeCompare(b.label));
+}
+
+/** Record one Windows application once, keyed by its executable path. */
+function addWindowsApp(found, fullPath, fileName) {
+  if (found.has(fullPath)) return;
+  const label = fileName.slice(0, -'.exe'.length);
+  found.set(fullPath, { id: fullPath, label, path: fullPath, icon: null });
 }
 
 /**

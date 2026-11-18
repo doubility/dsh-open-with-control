@@ -77,7 +77,7 @@ dsh plugin --profile <profile> add /absolute/path/to/dsh-open-with-control
 
 ### Windows
 
-- 应用是 `Program Files` 与 `Program Files (x86)` 下最多三层的 `.exe`（有条目预算上限）
+- 应用是 `Program Files` 与 `Program Files (x86)` 下最多三层的 `.exe`，每个根目录各有独立的条目预算。命令行工具目录（Git、MSYS2、nodejs、Windows Kits 等）和辅助程序（卸载程序、更新程序、`pythonw`、`bin_*` 启动器）会被跳过，一两个字母的名字视为命令行垫片而丢弃
 - 图标通过 PowerShell 的 `System.Drawing` 提取
 - 启动时把目录作为参数传给该可执行文件
 

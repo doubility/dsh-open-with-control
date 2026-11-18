@@ -77,7 +77,7 @@ All routes sit behind the deployment's connection trust fence. Preferences live 
 
 ### Windows
 
-- Applications are `.exe` files discovered up to three levels deep under `Program Files` and `Program Files (x86)` (bounded by an entry budget)
+- Applications are `.exe` files discovered up to three levels deep under `Program Files` and `Program Files (x86)`, each root with its own entry budget. Command-line toolchain folders (Git, MSYS2, nodejs, Windows Kits, Python's own tooling and similar) and helper executables (uninstallers, updaters, `pythonw`, `bin_*` launchers) are skipped, and one- or two-letter names are dropped as CLI shims
 - Icons are extracted through PowerShell `System.Drawing`
 - Launching starts the executable with the directory as its argument
 
