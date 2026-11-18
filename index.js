@@ -234,6 +234,8 @@ const SYSTEM_APP_DIRS = {
   win32: [
     join(process.env.ProgramFiles ?? 'C:\\Program Files'),
     join(process.env['ProgramFiles(x86)'] ?? 'C:\\Program Files (x86)'),
+    // Per-user installs (VS Code, many Chinese apps) land here, not in Program Files.
+    join(process.env.LOCALAPPDATA ?? join(homedir(), 'AppData', 'Local'), 'Programs'),
   ],
 };
 
@@ -374,7 +376,9 @@ async function systemApplicationIcon(platform, appPath) {
 
 /** Folder names under Program Files that hold command-line toolchains, not applications. */
 const WINDOWS_TOOLCHAIN_DIRS = new Set([
-  'git', 'msys2', 'msys', 'mingw64', 'mingw32', 'cygwin', 'nodejs', 'python', 'go',
+  // `bin` holds command-line entry points (VS Code's bin\code.exe, and the like),
+  // never the application itself, so the whole folder is skipped.
+  'bin', 'git', 'msys2', 'msys', 'mingw64', 'mingw32', 'cygwin', 'nodejs', 'python', 'go',
   'windows kits', 'dotnet', 'microsoft sdks', 'microsoft visual studio', 'dart-sdk',
   'java', 'jdk', 'openjdk', 'php', 'ruby', 'rustup', 'cmake', 'llvm', 'mysql', 'postgresql',
 ]);
