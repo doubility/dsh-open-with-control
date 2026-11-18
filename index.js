@@ -21,6 +21,7 @@ import { stat } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { dirname, extname, isAbsolute, join } from 'node:path';
 import { mkdtemp } from 'node:fs/promises';
+import { isDeveloperApp } from './developer-apps.js';
 import { rm } from 'node:fs/promises';
 
 const execFileAsync = promisify(execFile);
@@ -159,6 +160,8 @@ function sanitizeState(input) {
       typeof source.defaultApp === 'string' && source.defaultApp.length <= 120
         ? source.defaultApp
         : null,
+    // Off by default: the Open with menu offers developer tools only.
+    showAll: source.showAll === true,
     custom,
   };
 }
@@ -337,10 +340,10 @@ async function applicationIconDataUrl(platform, appPath) {
  * platform can supply one. macOS reads `.app` bundles; Windows reads `.exe`
  * files one level deep under the two Program Files directories.
  */
-async function listSystemApplications(platform) {
+async function listSystemApplications(platform, { showAll = false } = {}) {
   const dirs = SYSTEM_APP_DIRS[platform] ?? [];
   if (platform === 'win32') {
-    return listWindowsApplications(dirs);
+    return listWindowsApplications(dirs, { showAll });
   }
   const seen = new Map();
   for (const dir of dirs) {
@@ -409,7 +412,7 @@ function isWindowsApplicationExe(fileName) {
  * folders and helper executables are skipped. Every root gets its own budget,
  * so one large tree cannot starve the others.
  */
-async function listWindowsApplications(roots) {
+async function listWindowsApplications(roots, { showAll = false } = {}) {
   const found = new Map();
   for (const root of roots) {
     const perRoot = { remaining: WINDOWS_ROOT_BUDGET };
@@ -432,7 +435,11 @@ async function listWindowsApplications(roots) {
           perRoot.remaining -= 1;
           const full = join(dir, child.name);
           if (child.isFile() && extname(child.name).toLowerCase() === '.exe') {
-            if (isWindowsApplicationExe(child.name)) addWindowsApp(found, full, child.name);
+            if (!isWindowsApplicationExe(child.name)) continue;
+            const exeName = child.name.slice(0, -'.exe'.length);
+            // Default view: developer tools only. "Show all" lifts the allowlist.
+            if (!showAll && !isDeveloperApp(exeName, exeName)) continue;
+            addWindowsApp(found, full, child.name);
           } else if (child.isDirectory() && depth < WINDOWS_MAX_DEPTH) {
             if (WINDOWS_TOOLCHAIN_DIRS.has(child.name.toLowerCase())) continue;
             next.push(full);
@@ -667,7 +674,8 @@ export function apply(ctx) {
             sendMethodNotAllowed(res, 'GET');
             return;
           }
-          sendJson(res, 200, await listSystemApplications(process.platform));
+          const state = await read();
+          sendJson(res, 200, await listSystemApplications(process.platform, { showAll: state.showAll }));
         },
       }),
     `open-with-control: ${SYSTEM_APPS_ROUTE}`,

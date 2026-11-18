@@ -953,6 +953,23 @@ window.__ModuleLoader__.load({
           h(
             'div',
             { className: 'owc-body' },
+            h(
+              'label',
+              { className: 'owc-field', style: { display: 'flex', gap: 8, alignItems: 'flex-start', margin: '8px 0 4px' } },
+              h('input', {
+                type: 'checkbox',
+                className: 'owc-check',
+                checked: prefs.showAll === true,
+                onChange: (event) => commit({ ...prefs, showAll: event.target.checked }),
+                style: { width: 14, height: 14, margin: '2px 0 0', flex: 'none' },
+              }),
+              h(
+                'span',
+                { style: { display: 'flex', flexDirection: 'column', gap: 2 } },
+                h('span', { className: 'owc-rowName' }, t('manage.showAll')),
+                h('span', { className: 'owc-note', style: { margin: 0 } }, t('manage.showAllNote')),
+              ),
+            ),
             h('div', { className: 'owc-hgroup' }, h('span', { className: 'owc-hlabel' }, t('manage.visible'))),
             all.length === 0
               ? h('p', { className: 'owc-note' }, t('manage.noVisible'))
@@ -1136,6 +1153,8 @@ window.__ModuleLoader__.load({
         'manage.subtitle': '选择会话头部菜单里出现哪些应用，并决定它们的顺序与默认项。',
         'manage.close': '关闭',
         'manage.visible': '菜单中的应用',
+        'manage.showAll': '显示全部应用（包括非开发工具）',
+        'manage.showAllNote': '默认只列出开发工具。打开后，Program Files 与用户目录下的所有应用都会出现，列表会变长、加载也更慢。',
         'manage.hidden': '已移除',
         'manage.defaultTag': '默认',
         'manage.moveUp': '上移',
@@ -1178,6 +1197,8 @@ window.__ModuleLoader__.load({
           'Choose which applications the session header menu offers, and set their order and default.',
         'manage.close': 'Close',
         'manage.visible': 'In the menu',
+        'manage.showAll': 'Show all applications (not just developer tools)',
+        'manage.showAllNote': 'By default only developer tools are listed. Turning this on lists every application under Program Files and the per-user folders, which makes the list longer and slower to load.',
         'manage.hidden': 'Removed',
         'manage.defaultTag': 'Default',
         'manage.moveUp': 'Move up',
