@@ -1,6 +1,6 @@
 {
   "name": "dsh-open-with-control",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "type": "module",
   "description": "Control the session header's Open with menu: choose, order, and remove applications, pin a default, and add applications installed on this machine (macOS and Windows).",
   "keywords": [
@@ -19,6 +19,7 @@
   "files": [
     "index.js",
     "client.js",
+    "developer-apps.js",
     "cordis.patch.yml",
     "locale/*.json",
     "icon.svg",
