@@ -955,17 +955,16 @@ window.__ModuleLoader__.load({
             { className: 'owc-body' },
             h(
               'label',
-              { className: 'owc-field', style: { display: 'flex', gap: 8, alignItems: 'flex-start', margin: '8px 0 4px' } },
+              { className: 'owc-toggle' },
               h('input', {
                 type: 'checkbox',
-                className: 'owc-check',
+                className: 'owc-toggle-box',
                 checked: prefs.showAll === true,
                 onChange: (event) => commit({ ...prefs, showAll: event.target.checked }),
-                style: { width: 14, height: 14, margin: '2px 0 0', flex: 'none' },
               }),
               h(
                 'span',
-                { style: { display: 'flex', flexDirection: 'column', gap: 2 } },
+                { className: 'owc-toggle-text' },
                 h('span', { className: 'owc-rowName' }, t('manage.showAll')),
                 h('span', { className: 'owc-note', style: { margin: 0 } }, t('manage.showAllNote')),
               ),
@@ -1138,6 +1137,13 @@ window.__ModuleLoader__.load({
   background:var(--dsw-alias-bg-overlay);box-shadow:var(--dsw-elevation-prominent);
   color:var(--dsw-alias-label-primary);font-size:12px;pointer-events:auto}
 .owc-toast[data-tone="error"]{color:var(--dsw-alias-state-error-primary)}
+.owc-toggle{display:flex;align-items:flex-start;gap:10px;margin:8px 0 4px;padding:8px 10px;border-radius:var(--dsw-radius-sm);cursor:pointer;user-select:none}
+@media (hover:hover){.owc-toggle:hover{background:var(--dsw-alias-interactive-bg-hover)}}
+.owc-toggle-box{appearance:none;-webkit-appearance:none;flex:none;width:16px;height:16px;margin:2px 0 0;border:1px solid var(--dsw-alias-border-l2);border-radius:4px;background:var(--dsw-alias-bg-layer-1);cursor:pointer;position:relative}
+.owc-toggle-box:checked{background:var(--dsw-alias-brand-primary);border-color:var(--dsw-alias-brand-primary)}
+.owc-toggle-box:checked::after{content:"";position:absolute;left:4px;top:1px;width:4px;height:9px;border:solid var(--dsw-alias-bg-layer-1);border-width:0 2px 2px 0;transform:rotate(45deg)}
+.owc-toggle-box:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:2px}
+.owc-toggle-text{display:flex;flex-direction:column;gap:2px;min-width:0}
 `;
 
     /** Dictionaries; Chinese is the key-set source of truth, English is complete. */
