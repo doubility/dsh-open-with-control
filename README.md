@@ -33,11 +33,25 @@ DeepSeek Harness 自带一个「打开方式」分裂按钮，用已安装的应
 
 ## 安装
 
+从 GitHub 的发布物安装（固定到某个版本）：
+
 ```bash
-dsh plugin --profile <profile> add dsh-open-with-control
+dsh plugin --profile <profile> add https://github.com/doubility/dsh-open-with-control/releases/download/v1.3.1/dsh-open-with-control-1.3.1.tgz
 ```
 
-或从本地目录安装：
+或者直接用仓库的 tag（需要能访问 `github.com`）：
+
+```bash
+dsh plugin --profile <profile> add github:doubility/dsh-open-with-control#v1.3.1
+```
+
+`github.com` 直连不稳定时，用 codeload 上的 tag 压缩包：
+
+```bash
+dsh plugin --profile <profile> add https://codeload.github.com/doubility/dsh-open-with-control/tar.gz/refs/tags/v1.3.1
+```
+
+或从本地目录安装（开发用，改代码即时生效）：
 
 ```bash
 dsh plugin --profile <profile> add /absolute/path/to/dsh-open-with-control

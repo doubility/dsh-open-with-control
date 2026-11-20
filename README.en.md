@@ -33,11 +33,25 @@ The applications folder lists allowlisted applications first, with one button fo
 
 ## Install
 
+Install the release artifact from GitHub (pinned to a version):
+
 ```bash
-dsh plugin --profile <profile> add dsh-open-with-control
+dsh plugin --profile <profile> add https://github.com/doubility/dsh-open-with-control/releases/download/v1.3.1/dsh-open-with-control-1.3.1.tgz
 ```
 
-Or from a local checkout:
+Or the repository tag (needs access to `github.com`):
+
+```bash
+dsh plugin --profile <profile> add github:doubility/dsh-open-with-control#v1.3.1
+```
+
+If `github.com` is unreachable, use the tag archive on codeload:
+
+```bash
+dsh plugin --profile <profile> add https://codeload.github.com/doubility/dsh-open-with-control/tar.gz/refs/tags/v1.3.1
+```
+
+Or from a local checkout (development, edits apply immediately):
 
 ```bash
 dsh plugin --profile <profile> add /absolute/path/to/dsh-open-with-control
